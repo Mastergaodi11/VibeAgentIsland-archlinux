@@ -1336,6 +1336,7 @@ async fn persist_sessions_snapshot(state: &std::sync::Arc<AppState>) -> Result<(
     drop(sessions);
 
     let db = state.db.lock().expect("db mutex poisoned");
+    db.execute("DELETE FROM sessions", [])?;
     for summary in rows {
         let payload = serde_json::to_string(&summary)?;
         db.execute(
@@ -2204,6 +2205,15 @@ fn detect_agent_source(cmdline: &str) -> Option<AgentSource> {
     }
     if token_lower.contains("codex") || lower.contains(" codex") || lower.starts_with("codex ") {
         return Some(AgentSource::Codex);
+    }
+    if token_lower.contains("gemini")
+        || lower.contains(" gemini")
+        || lower.starts_with("gemini ")
+        || lower.contains("@google/gemini-cli")
+        || lower.contains("/bin/gemini")
+        || lower.contains("gemini.js")
+    {
+        return Some(AgentSource::Gemini);
     }
     None
 }

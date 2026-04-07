@@ -11,6 +11,9 @@ Post-beta fixes currently staged for the next public update:
 - collaboration cards are no longer injected into the island unless collaboration is explicitly re-enabled
 - pending approval requests are now overlaid into the shell session model so blocked prompts remain visible in the island even when Telegram already sees them
 - session dedupe now also merges on stable session id aliases, which reduces duplicate cards for the same live terminal
+- Codex `approval_policy = "never"` is now respected by the local bridge so normal implementation work no longer produces false approval cards in the island
+- the shell now backfills live Claude / Codex / Gemini sessions from local process and transcript artifacts, which makes reopen detection more reliable even when daemon snapshots lag behind
+- Gemini approvals now flow through the same provider-aware island + Telegram path as Claude and Codex when a managed approval request is present
 
 ## 0.1.0-beta.1 - 2026-04-06
 

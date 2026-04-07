@@ -28,6 +28,7 @@ CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 CODEX_CONFIG_PATH = Path.home() / ".codex" / "config.toml"
 CODEX_HOOKS_PATH = Path.home() / ".codex" / "hooks.json"
 CODEX_HISTORY_PATH = Path.home() / ".codex" / "history.jsonl"
+GEMINI_SETTINGS_PATH = Path.home() / ".gemini" / "settings.json"
 BACKUP_ROOT = Path.home() / ".config" / "vibeisland" / "backups"
 STATE_ROOT = Path(os.environ.get("VIBEISLAND_STATE_DIR") or (Path.home() / ".local" / "state" / "vibeisland"))
 CLAUDE_STATUSLINE_PATH = STATE_ROOT / "claude_statusline.json"
@@ -88,6 +89,27 @@ LIVE_SCAN_NONINTERACTIVE = {
         "mcp-server",
         "review",
         "resume",
+        "--help",
+        "-h",
+    },
+    "gemini": {
+        "auth",
+        "completion",
+        "doctor",
+        "extension",
+        "extensions",
+        "help",
+        "hook",
+        "hooks",
+        "install",
+        "login",
+        "logout",
+        "mcp",
+        "skill",
+        "skills",
+        "plugins",
+        "update",
+        "upgrade",
         "--help",
         "-h",
     },
@@ -1556,7 +1578,7 @@ def codex_pretool_requires_approval(
         return False, turn_context
 
     if approval_policy == "never":
-        return is_risky_command(command), turn_context
+        return False, turn_context
 
     if approval_policy == "untrusted":
         return not is_safe_readonly_command(command), turn_context
@@ -1603,6 +1625,15 @@ def approval_rule_for_payload(source: str, payload: dict[str, Any]) -> dict[str,
         tool_input = payload.get("tool_input") or {}
         if tool_name.lower() == "bash":
             command = str(tool_input.get("command") or "").strip()
+            if not command:
+                return None
+            return {"kind": "command_exact", "tool_name": tool_name, "command": command}
+        if tool_name:
+            return {"kind": "tool_name", "tool_name": tool_name}
+    if lowered_source == "gemini":
+        tool_name, tool_input = gemini_tool_input(payload)
+        if normalize_text(tool_name).lower() == "bash":
+            command = str(tool_input.get("command") or payload.get("command") or "").strip()
             if not command:
                 return None
             return {"kind": "command_exact", "tool_name": tool_name, "command": command}
@@ -1791,6 +1822,14 @@ def managed_deny_output(reason: str) -> int:
     return 0
 
 
+def gemini_managed_output(decision: str, reason: str | None = None) -> int:
+    payload: dict[str, Any] = {"decision": decision}
+    if reason and decision == "deny":
+        payload["reason"] = truncate(reason, 240)
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    return 0
+
+
 def maybe_complete_managed_approval(
     *,
     source: str,
@@ -1817,6 +1856,8 @@ def maybe_complete_managed_approval(
                 socket_path,
                 ignore_errors=True,
             )
+            if source == "gemini":
+                return gemini_managed_output("allow")
             return 0
         if action == "allow_once":
             publish_event(
@@ -1829,6 +1870,8 @@ def maybe_complete_managed_approval(
                 socket_path,
                 ignore_errors=True,
             )
+            if source == "gemini":
+                return gemini_managed_output("allow")
             return 0
 
         if action == "deny":
@@ -1845,6 +1888,8 @@ def maybe_complete_managed_approval(
                 socket_path,
                 ignore_errors=True,
             )
+            if source == "gemini":
+                return gemini_managed_output("deny", reason)
             return managed_deny_output(reason)
 
         timeout_reason = str(decision.get("reason") or "Vibe Island approval timed out.")
@@ -1860,6 +1905,8 @@ def maybe_complete_managed_approval(
             socket_path,
             ignore_errors=True,
         )
+        if source == "gemini":
+            return gemini_managed_output("deny", timeout_reason)
         return managed_deny_output(timeout_reason)
     finally:
         clear_approval_request(source, session_id)
@@ -2342,6 +2389,382 @@ def event_from_codex_notify(payload: Any) -> dict[str, Any]:
     )
 
 
+def normalize_gemini_hook_name(name: Any) -> str:
+    normalized = normalize_text(name)
+    mapping = {
+        "BeforeTool": "PreToolUse",
+        "AfterTool": "PostToolUse",
+        "BeforeAgent": "SubagentStart",
+        "AfterAgent": "SubagentStop",
+    }
+    return mapping.get(normalized, normalized or "Unknown")
+
+
+def gemini_tool_input(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    tool_name = normalize_text(
+        first_present(
+            payload.get("tool_name"),
+            payload.get("toolName"),
+            payload.get("tool"),
+            (payload.get("toolCall") or {}).get("name") if isinstance(payload.get("toolCall"), dict) else None,
+            (payload.get("tool_call") or {}).get("name") if isinstance(payload.get("tool_call"), dict) else None,
+            payload.get("name"),
+        )
+    )
+    raw_args = first_present(
+        payload.get("tool_input"),
+        payload.get("toolInput"),
+        payload.get("args"),
+        payload.get("input"),
+        payload.get("toolArguments"),
+        payload.get("parameters"),
+        (payload.get("toolCall") or {}).get("args") if isinstance(payload.get("toolCall"), dict) else None,
+        (payload.get("tool_call") or {}).get("args") if isinstance(payload.get("tool_call"), dict) else None,
+    )
+    tool_input = raw_args if isinstance(raw_args, dict) else {}
+    aliases = {
+        "run_shell_command": "Bash",
+        "write_file": "Write",
+        "replace": "Edit",
+        "read_file": "Read",
+        "glob": "Glob",
+        "grep": "Grep",
+        "ls": "LS",
+    }
+    display_name = aliases.get(tool_name, tool_name or "tool")
+    return display_name, tool_input
+
+
+def extract_choices_from_permission_options(value: Any) -> list[str]:
+    choices: list[str] = []
+    if isinstance(value, dict):
+        nested = first_present(
+            value.get("options"),
+            value.get("permission_options"),
+            value.get("permissionOptions"),
+            value.get("choices"),
+            value.get("items"),
+        )
+        return extract_choices_from_permission_options(nested)
+    if not isinstance(value, list):
+        return []
+    for item in value:
+        text = ""
+        if isinstance(item, dict):
+            text = normalize_text(first_present(item.get("name"), item.get("label"), item.get("title"), item.get("kind")))
+        elif isinstance(item, str):
+            text = normalize_text(item)
+        if text and text not in choices:
+            choices.append(text)
+    return choices[:6]
+
+
+def extract_gemini_choices(payload: dict[str, Any]) -> list[str]:
+    for key in (
+        "choices",
+        "permission_options",
+        "permissionOptions",
+        "options",
+        "answers",
+    ):
+        choices = extract_choices_from_permission_options(payload.get(key))
+        if choices:
+            return choices
+    for key in ("request_permission", "requestPermission", "permission_request", "permissionRequest"):
+        nested = payload.get(key)
+        if not isinstance(nested, dict):
+            continue
+        choices = extract_choices_from_permission_options(
+            first_present(
+                nested.get("options"),
+                nested.get("permission_options"),
+                nested.get("permissionOptions"),
+                nested.get("choices"),
+                nested.get("items"),
+            )
+        )
+        if choices:
+            return choices
+    for candidate in (
+        payload.get("tool_input"),
+        payload.get("toolInput"),
+        payload.get("toolCall"),
+        payload.get("tool_call"),
+    ):
+        tool_input = candidate if isinstance(candidate, dict) else {}
+        for key in ("choices", "permission_options", "permissionOptions", "options", "request_permission", "requestPermission"):
+            choices = extract_choices_from_permission_options(tool_input.get(key))
+            if choices:
+                return choices
+    return []
+
+
+def gemini_requires_permission(
+    payload: dict[str, Any],
+    tool_input: dict[str, Any],
+    inferred: dict[str, Any] | None,
+    explicit_choices: list[str],
+) -> bool:
+    if explicit_choices:
+        return True
+
+    containers: list[dict[str, Any]] = []
+    for candidate in (
+        payload,
+        tool_input,
+        payload.get("request_permission"),
+        payload.get("requestPermission"),
+        payload.get("permission_request"),
+        payload.get("permissionRequest"),
+        payload.get("details"),
+        payload.get("metadata"),
+        payload.get("toolCall"),
+    ):
+        if isinstance(candidate, dict):
+            containers.append(candidate)
+
+    truthy_keys = (
+        "approval_required",
+        "requires_approval",
+        "permission_required",
+        "permissionRequired",
+        "request_permission",
+        "requestPermission",
+        "requiresPermission",
+        "confirmationRequired",
+        "confirm_required",
+        "should_confirm",
+        "needs_confirmation",
+        "needsApproval",
+        "awaitingApproval",
+    )
+    for container in containers:
+        for key in truthy_keys:
+            if container.get(key):
+                return True
+
+    if inferred and inferred.get("kind") in {"needs_approval", "ask_user"}:
+        return True
+    return False
+
+
+def gemini_pretool_requires_approval(
+    payload: dict[str, Any],
+    tool_name: str,
+    tool_input: dict[str, Any],
+    command: str,
+    inferred: dict[str, Any] | None,
+    explicit_choices: list[str],
+) -> bool:
+    if gemini_requires_permission(payload, tool_input, inferred, explicit_choices):
+        return True
+    if normalize_text(tool_name).lower() == "bash":
+        return is_risky_command(command)
+    return False
+
+
+def gemini_approval_details(tool_name: str, tool_input: dict[str, Any], payload: dict[str, Any]) -> tuple[str, str, str, list[str]]:
+    command = normalize_text(first_present(tool_input.get("command"), payload.get("command")))
+    permission_request = first_present(
+        payload.get("request_permission"),
+        payload.get("requestPermission"),
+        payload.get("permission_request"),
+        payload.get("permissionRequest"),
+        tool_input.get("request_permission"),
+        tool_input.get("requestPermission"),
+        (payload.get("toolCall") or {}).get("requestPermission") if isinstance(payload.get("toolCall"), dict) else None,
+        (payload.get("tool_call") or {}).get("requestPermission") if isinstance(payload.get("tool_call"), dict) else None,
+    )
+    permission_request = permission_request if isinstance(permission_request, dict) else {}
+    detail = first_present(
+        command,
+        tool_input.get("path"),
+        tool_input.get("file_path"),
+        tool_input.get("description"),
+        permission_request.get("detail"),
+        payload.get("message"),
+        payload.get("reason"),
+    )
+    approval_type = "command" if command else normalize_text(tool_name).lower() or "approval"
+    question = truncate(
+        first_present(
+            permission_request.get("question"),
+            permission_request.get("title"),
+            payload.get("question"),
+            payload.get("message"),
+            payload.get("reason"),
+            f"Gemini needs your permission to use {tool_name}",
+        ),
+        140,
+    ) or f"Gemini needs your permission to use {tool_name}"
+    summary = truncate(f"{tool_name} wants approval: {detail}" if detail else question, 140)
+    choices = (
+        extract_gemini_choices(payload)
+        or extract_choices_from_permission_options(permission_request)
+        or extract_choices_from_schema(payload.get("requested_schema"))
+        or extract_choices_from_text(first_present(payload.get("message"), payload.get("reason"), question))
+        or default_approval_choices()
+    )
+    return approval_type, question, summary, choices
+
+
+def event_from_gemini_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    hook_name = normalize_gemini_hook_name(
+        first_present(payload.get("hook_event_name"), payload.get("eventName"), payload.get("event"), payload.get("hook"))
+    )
+    cwd = first_present(payload.get("cwd"), payload.get("workspace"), payload.get("workspaceDir"), os.getcwd())
+    session_id = first_present(payload.get("session_id"), payload.get("sessionId"), payload.get("id"))
+    if not session_id:
+        session_id = f"gemini-{uuid.uuid4().hex[:8]}"
+    run_id = first_present(payload.get("turn_id"), payload.get("turnId"), payload.get("run_id"), payload.get("runId"))
+    jump = detect_jump_target()
+
+    tool_name, tool_input = gemini_tool_input(payload)
+    command = normalize_text(first_present(tool_input.get("command"), payload.get("command")))
+    message_seed = first_present(
+        payload.get("message"),
+        payload.get("reason"),
+        payload.get("summary"),
+        payload.get("last_assistant_message"),
+        payload.get("text"),
+    )
+    title_seed = first_present(
+        payload.get("prompt"),
+        payload.get("user_prompt"),
+        payload.get("userMessage"),
+        message_seed,
+    )
+
+    kind = "session_updated"
+    state = "running"
+    summary = truncate(normalize_text(message_seed or hook_name), 140) or hook_name
+    title = derive_title(title_seed, str(cwd))
+    task_label = derive_task_label(title_seed, str(cwd)) or None
+    approval_type = None
+    question = None
+    choices: list[str] = []
+    review: dict[str, Any] = {}
+
+    inferred = detect_interaction_from_message(first_present(payload.get("message"), payload.get("last_assistant_message"), payload.get("reason")))
+
+    if hook_name == "SessionStart":
+        kind = "session_started"
+        source_label = normalize_text(first_present(payload.get("source"), payload.get("sessionStartSource"), "startup"))
+        summary = f"Gemini session started ({source_label or 'startup'})"
+        title = derive_title(first_present(payload.get("prompt"), source_label), str(cwd))
+        task_label = derive_task_label(first_present(payload.get("prompt"), source_label), str(cwd)) or None
+    elif hook_name == "SessionEnd":
+        kind = "completed"
+        state = "completed"
+        summary = truncate(first_present(payload.get("message"), payload.get("reason"), payload.get("last_assistant_message"), "Gemini session ended"), 140)
+        title = derive_title(first_present(payload.get("last_assistant_message"), payload.get("message"), title_seed), str(cwd))
+        task_label = derive_task_label(first_present(payload.get("last_assistant_message"), payload.get("message"), title_seed), str(cwd)) or None
+    elif hook_name == "PreToolUse":
+        detail = first_present(
+            command,
+            tool_input.get("path"),
+            tool_input.get("file_path"),
+            tool_input.get("description"),
+            tool_name,
+        )
+        summary = truncate(f"{tool_name}: {detail}" if detail else f"Gemini is preparing {tool_name}", 140)
+        title = derive_title(detail or tool_name, str(cwd))
+        task_label = derive_task_label(detail or tool_name, str(cwd)) or None
+        explicit_choices = extract_gemini_choices(payload)
+        requires_approval = gemini_pretool_requires_approval(payload, tool_name, tool_input, command, inferred, explicit_choices)
+        if requires_approval:
+            kind = "needs_approval"
+            state = "blocked"
+            approval_type, question, summary, choices = gemini_approval_details(tool_name, tool_input, payload)
+            review = build_review_info(
+                cwd=str(cwd),
+                command=command or None,
+                detail=first_present(tool_input.get("description"), tool_input.get("file_path"), question, detail),
+                tool_name=tool_name,
+                approval_type=approval_type,
+            )
+    elif hook_name == "PostToolUse":
+        detail = first_present(command, tool_input.get("path"), tool_input.get("file_path"), tool_name)
+        summary = truncate(f"Completed: {detail}" if detail else f"{tool_name} completed", 140)
+        title = derive_title(detail or tool_name, str(cwd))
+        task_label = derive_task_label(detail or tool_name, str(cwd)) or None
+    elif hook_name == "SubagentStart":
+        detail = normalize_text(first_present(payload.get("message"), payload.get("prompt"), payload.get("task"), payload.get("reason")))
+        summary = truncate(detail or "Gemini is thinking", 140)
+        title = derive_title(first_present(payload.get("prompt"), payload.get("task"), title_seed), str(cwd))
+        task_label = derive_task_label(first_present(payload.get("prompt"), payload.get("task"), title_seed), str(cwd)) or None
+        if inferred and inferred["kind"] in {"needs_approval", "ask_user"}:
+            kind = inferred["kind"]
+            state = inferred["state"]
+            approval_type = inferred["approval_type"]
+            question = inferred["question"]
+            choices = inferred["choices"]
+    elif hook_name == "SubagentStop":
+        if inferred:
+            kind = inferred["kind"]
+            state = inferred["state"]
+            approval_type = inferred["approval_type"]
+            question = inferred["question"]
+            choices = inferred["choices"]
+            summary = inferred["summary"]
+            title = derive_title(question, str(cwd))
+            task_label = derive_task_label(question, str(cwd)) or None
+        else:
+            kind = "completed"
+            state = "completed"
+            summary = truncate(first_present(payload.get("message"), payload.get("last_assistant_message"), "Gemini finished responding"), 140)
+            title = derive_title(first_present(payload.get("last_assistant_message"), payload.get("message"), title_seed), str(cwd))
+            task_label = derive_task_label(first_present(payload.get("last_assistant_message"), payload.get("message"), title_seed), str(cwd)) or None
+    elif inferred:
+        kind = inferred["kind"]
+        state = inferred["state"]
+        approval_type = inferred["approval_type"]
+        question = inferred["question"]
+        choices = inferred["choices"]
+        summary = inferred["summary"]
+        title = derive_title(question, str(cwd))
+        task_label = derive_task_label(question, str(cwd)) or None
+
+    stable_label = stable_task_label_for_event(
+        "gemini",
+        str(session_id),
+        payload,
+        str(cwd),
+        payload.get("prompt"),
+        payload.get("user_prompt"),
+        payload.get("userMessage"),
+        payload.get("message"),
+    )
+    if stable_label:
+        task_label = stable_label
+        title = truncate(stable_label, 44)
+
+    return make_event(
+        source="gemini",
+        adapter="gemini-hook",
+        session_id=str(session_id),
+        run_id=run_id,
+        kind=kind,
+        state=state,
+        title=title,
+        task_label=task_label,
+        summary=summary,
+        approval_type=approval_type,
+        question=question,
+        choices=choices,
+        review=review,
+        workspace=str(cwd),
+        cwd=str(cwd),
+        terminal=jump["terminal"],
+        tty=jump["tty"],
+        pid=jump["pid"],
+        tmux_session=jump["tmux_session"],
+        tmux_window=jump["tmux_window"],
+        tmux_pane=jump["tmux_pane"],
+        raw=payload,
+    )
+
+
 def choose_jump_target(payload: dict[str, Any]) -> dict[str, Any] | None:
     if "jump_target" in payload and isinstance(payload["jump_target"], dict):
         return payload["jump_target"]
@@ -2556,9 +2979,18 @@ def classify_live_agent(argv: list[str]) -> str | None:
     ):
         return None
 
-    for source in ("claude", "codex"):
+    for source in ("claude", "codex", "gemini"):
         for index, token in enumerate(lowered):
-            if Path(token).name != source:
+            token_name = Path(token).name
+            matches_source = token_name == source
+            if source == "gemini":
+                matches_source = (
+                    matches_source
+                    or token_name == "gemini.js"
+                    or "@google/gemini-cli" in token
+                    or token.endswith("/gemini.js")
+                )
+            if not matches_source:
                 continue
             next_token = lowered[index + 1] if index + 1 < len(lowered) else ""
             if next_token in LIVE_SCAN_NONINTERACTIVE[source]:
@@ -3596,6 +4028,19 @@ def build_codex_hooks() -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def build_gemini_hooks() -> dict[str, list[dict[str, Any]]]:
+    command = bridge_command_string("gemini-hook")
+    handler = {"type": "command", "command": command, "timeout": 5000}
+    return {
+        "SessionStart": [{"hooks": [handler]}],
+        "SessionEnd": [{"hooks": [handler]}],
+        "BeforeTool": [{"hooks": [handler]}],
+        "AfterTool": [{"hooks": [handler]}],
+        "BeforeAgent": [{"hooks": [handler]}],
+        "AfterAgent": [{"hooks": [handler]}],
+    }
+
+
 def group_contains_marker(group: dict[str, Any], marker: str) -> bool:
     hooks = group.get("hooks")
     if not isinstance(hooks, list):
@@ -3736,6 +4181,31 @@ def install_codex_hooks(
         "config_backup": str(config_backup) if config_backup else None,
         "hooks_backup": str(hooks_backup) if hooks_backup else None,
         "events": sorted(build_codex_hooks().keys()),
+        "dry_run": dry_run,
+    }
+
+
+def install_gemini_hooks(settings_path: Path, dry_run: bool = False) -> dict[str, Any]:
+    data = read_json_file(settings_path, {})
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+
+    for event_name, groups in build_gemini_hooks().items():
+        hooks[event_name] = merge_hook_groups(hooks.get(event_name), groups, "gemini-hook")
+
+    data["hooks"] = hooks
+    rendered = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+    backup = None
+    if not dry_run:
+        backup = backup_file(settings_path)
+        atomic_write_text(settings_path, rendered)
+
+    return {
+        "path": str(settings_path),
+        "backup": str(backup) if backup else None,
+        "events": sorted(build_gemini_hooks().keys()),
         "dry_run": dry_run,
     }
 
@@ -4473,6 +4943,74 @@ def maybe_handle_managed_codex_pretool(payload: dict[str, Any], socket_path: str
     )
 
 
+def maybe_handle_managed_gemini_pretool(payload: dict[str, Any], socket_path: str) -> int | None:
+    hook_name = normalize_gemini_hook_name(
+        first_present(payload.get("hook_event_name"), payload.get("eventName"), payload.get("event"), payload.get("hook"))
+    )
+    if hook_name != "PreToolUse":
+        return None
+
+    source = "gemini"
+    session_id = str(first_present(payload.get("session_id"), payload.get("sessionId"), payload.get("id")) or "")
+    if not session_id:
+        return None
+
+    tool_name, tool_input = gemini_tool_input(payload)
+    command = normalize_text(first_present(tool_input.get("command"), payload.get("command")))
+    inferred = detect_interaction_from_message(
+        first_present(payload.get("message"), payload.get("last_assistant_message"), payload.get("reason"))
+    )
+    explicit_choices = extract_gemini_choices(payload)
+    if not gemini_pretool_requires_approval(payload, tool_name, tool_input, command, inferred, explicit_choices):
+        return None
+
+    title_hint = str(first_present(command, tool_input.get("file_path"), tool_name, payload.get("question")) or "Gemini")
+    if has_matching_session_rule(source, session_id, payload):
+        publish_event(
+            managed_clear_event(
+                source=source,
+                payload=payload,
+                title_hint=title_hint,
+                summary="Auto-approved via Vibe Island session rule.",
+            ),
+            socket_path,
+            ignore_errors=True,
+        )
+        return gemini_managed_output("allow")
+
+    approval_type, question, summary, choices = gemini_approval_details(tool_name, tool_input, payload)
+    blocked_event = event_from_gemini_hook(payload)
+    if isinstance(blocked_event.get("raw"), dict):
+        blocked_event["raw"]["managed_approval"] = True
+    request = build_managed_approval_request(
+        source=source,
+        payload=payload,
+        approval_type=approval_type,
+        question=question,
+        summary=summary,
+        choices=choices,
+    )
+    blocked_session = blocked_event.get("session") or {}
+    blocked_title = normalize_text(blocked_session.get("title"))
+    blocked_task_label = normalize_text(blocked_session.get("task_label"))
+    if blocked_title:
+        request["title"] = blocked_title
+    if blocked_task_label and not is_low_signal_task_label(blocked_task_label):
+        request["task_label"] = blocked_task_label
+    request["jump_target"] = blocked_event.get("jump_target") or {}
+    request["ui_session_id"] = str(blocked_event.get("session", {}).get("id") or request.get("session_id") or "")
+    write_managed_approval_request(request)
+    decision = wait_for_managed_approval(request, blocked_event, socket_path)
+    return maybe_complete_managed_approval(
+        source=source,
+        payload=payload,
+        request=request,
+        decision=decision,
+        socket_path=socket_path,
+        title_hint=title_hint,
+    )
+
+
 def _percent_int(value: Any) -> int | None:
     if value is None:
         return None
@@ -4631,6 +5169,26 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gemini_hook(args: argparse.Namespace) -> int:
+    try:
+        payload = read_payload_from_input(args.payload)
+        if not isinstance(payload, dict):
+            payload = {"message": str(payload)}
+        maybe_log_hook_payload("gemini-hook", payload)
+        if args.print_event:
+            event = event_from_gemini_hook(payload)
+            print(json.dumps(event, ensure_ascii=False, indent=2))
+            return 0
+        managed = maybe_handle_managed_gemini_pretool(payload, args.socket)
+        if managed is not None:
+            return managed
+        event = event_from_gemini_hook(payload)
+        publish_event(event, args.socket, ignore_errors=True)
+    except Exception as exc:
+        print(f"[vibeisland] gemini-hook error: {exc}", file=sys.stderr)
+    return 0
+
+
 def cmd_codex_notify(args: argparse.Namespace) -> int:
     try:
         payload = read_payload_from_input(args.payload)
@@ -4657,6 +5215,9 @@ def cmd_install(args: argparse.Namespace) -> int:
             Path(args.codex_hooks),
             args.dry_run,
         )
+
+    if args.target in {"gemini", "all"}:
+        results["gemini"] = install_gemini_hooks(Path(args.gemini_settings), args.dry_run)
 
     print(json.dumps(results, ensure_ascii=False, indent=2), flush=True)
     return 0
@@ -5133,7 +5694,7 @@ def build_parser() -> argparse.ArgumentParser:
     emit.set_defaults(handler=lambda args: emit_event(args.source, args))
     emit.add_argument("--source", default="unknown")
 
-    for source_name in ("claude", "codex"):
+    for source_name in ("claude", "codex", "gemini"):
         command = sub.add_parser(source_name, parents=[common], help=f"Emit a {source_name} event")
         command.set_defaults(handler=lambda args, source_name=source_name: emit_event(source_name, args))
 
@@ -5179,12 +5740,13 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile.add_argument("--print-events", action="store_true")
     reconcile.set_defaults(handler=cmd_reconcile)
 
-    install = sub.add_parser("install", help="Install Claude/Codex integration hooks")
-    install.add_argument("target", choices=["claude", "codex", "all"])
+    install = sub.add_parser("install", help="Install Claude/Codex/Gemini integration hooks")
+    install.add_argument("target", choices=["claude", "codex", "gemini", "all"])
     install.add_argument("--dry-run", action="store_true")
     install.add_argument("--claude-settings", default=str(CLAUDE_SETTINGS_PATH))
     install.add_argument("--codex-config", default=str(CODEX_CONFIG_PATH))
     install.add_argument("--codex-hooks", default=str(CODEX_HOOKS_PATH))
+    install.add_argument("--gemini-settings", default=str(GEMINI_SETTINGS_PATH))
     install.set_defaults(handler=cmd_install)
 
     claude_statusline = sub.add_parser("claude-statusline", help="Capture Claude status line input for quota HUD")
@@ -5202,6 +5764,12 @@ def build_parser() -> argparse.ArgumentParser:
     codex_hook.add_argument("--payload")
     codex_hook.add_argument("--print-event", action="store_true")
     codex_hook.set_defaults(handler=cmd_codex_hook)
+
+    gemini_hook = sub.add_parser("gemini-hook", help="Bridge Gemini hook input into vibeisland")
+    gemini_hook.add_argument("--socket", default=DEFAULT_SOCKET)
+    gemini_hook.add_argument("--payload")
+    gemini_hook.add_argument("--print-event", action="store_true")
+    gemini_hook.set_defaults(handler=cmd_gemini_hook)
 
     codex_notify = sub.add_parser("codex-notify", help="Bridge Codex notify payload into vibeisland")
     codex_notify.add_argument("--socket", default=DEFAULT_SOCKET)

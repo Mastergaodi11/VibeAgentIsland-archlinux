@@ -27,6 +27,7 @@ Source:
 
 - https://vibeisland.app/
 - https://github.com/farouqaldori/claude-island
+- https://github.com/wxtsky/CodeIsland
 
 `claude-island` is the closest public UI reference for this project. The most useful ideas to borrow are:
 
@@ -35,6 +36,13 @@ Source:
 - restrained dark surfaces with semantic accents
 - inline approvals and tiny secondary icon actions
 - low-jitter layout with stable widths and heights
+
+`CodeIsland` is the strongest public reference for the next Linux-facing shell pass. The most useful ideas to borrow are:
+
+- provider-grouped sections in the expanded panel
+- compact section headers with counts
+- provider-specific pixel characters
+- denser list rows with clearer task / summary / action hierarchy
 
 ## Implemented Status
 
@@ -46,7 +54,12 @@ Implemented now:
 - SQLite-backed event and session persistence
 - realtime snapshot subscription from daemon to shell
 - live process re-scan so already-running Claude/Codex sessions reappear after reopen
+- shell-side live session backfill from local process + artifact inspection so Claude / Codex / Gemini can still reappear even if the daemon snapshot temporarily misses one live terminal
 - hook-based adapters for Claude Code and Codex CLI
+- provider-grouped shell view model for Claude / Codex / Gemini sections
+- Gemini CLI minimum-viable adapter path covering live detection, approvals/questions, jump, Telegram, and peek
+- Gemini usage currently reports transcript/session token totals only; stable local 5h / 7d quota windows have not been found yet
+- Codex bridge logic now strictly honors `approval_policy = "never"` so normal coding work does not surface false island approvals
 - managed in-island approval handling for core Claude/Codex flows
 - draggable Qt/QML floating shell with inline response cards
 - optimistic response updates so approval cards clear quickly after click
@@ -91,7 +104,7 @@ Not implemented yet:
 - full plan diff review
 - batch approval grouping
 - precision providers for kitty / wezterm / IDE terminals
-- production adapters beyond Claude/Codex
+- production adapters beyond Claude/Codex/Gemini
 
 ## Current Gaps To Close Next
 
@@ -102,7 +115,13 @@ The main remaining correctness gap is live-session identity after reopen:
 - shell display logic can recover some titles, but live process identity needs to come from session artifacts instead of only `tty`
 - generic fallback titles should not stick when a more specific artifact-backed title is available
 
-The next implementation slice therefore shifts to artifact-backed recovery.
+The next implementation slice therefore shifts to artifact-backed recovery and provider-grouped rendering.
+
+That means:
+
+- expanded sessions are grouped by provider
+- section collapse state is persisted in shell prefs
+- collapsed mode highlights the single most important session across all providers
 
 ## Architecture Summary
 
@@ -176,7 +195,7 @@ Examples:
 
 - `adapter-claude`
 - `adapter-codex`
-- later `adapter-gemini`
+- `adapter-gemini`
 
 Adapter responsibilities:
 
@@ -184,6 +203,12 @@ Adapter responsibilities:
 - map them to common schema
 - attach session and jump metadata
 - send normalized events to daemon
+
+Current normalized provider set:
+
+- `claude`
+- `codex`
+- `gemini`
 
 ### B. Session Aggregator
 

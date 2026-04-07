@@ -55,6 +55,12 @@ CLAUDE_STATUSLINE_PATH = Path.home() / ".local" / "state" / "vibeisland" / "clau
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CLAUDE_HISTORY_PATH = Path.home() / ".claude" / "history.jsonl"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+GEMINI_SETTINGS_PATH = Path.home() / ".gemini" / "settings.json"
+GEMINI_TMP_DIR = Path.home() / ".gemini" / "tmp"
+GEMINI_PROJECTS_PATH = Path.home() / ".gemini" / "projects.json"
+GEMINI_STATE_PATH = Path.home() / ".gemini" / "state.json"
+GEMINI_NVM_BIN = Path.home() / ".nvm" / "versions" / "node" / "v24.13.1" / "bin" / "gemini"
+APPROVAL_REQUEST_STALE_SECONDS = 12 * 60 * 60
 CODEX_SESSION_PATH_RE = re.compile(r"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 URL_RE = re.compile(r"https?://([^/\s`]+)")
 COMMAND_INTENT_RE = re.compile(
@@ -154,7 +160,24 @@ OPERATIONAL_LABEL_PREFIXES = (
     "npm -v",
     "pnpm -v",
 )
-_LOCAL_SESSION_CACHE: dict[str, Any] = {"expires_at": 0.0, "codex": [], "claude": []}
+PROVIDER_SECTION_ORDER = ("claude", "codex", "gemini", "collab", "other")
+PROVIDER_SECTION_LABELS = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "collab": "Collab",
+    "other": "Other",
+}
+PROVIDER_SECTION_ACCENTS = {
+    "claude": "#ca856f",
+    "codex": "#7ea8bf",
+    "gemini": "#8d83d2",
+    "collab": "#6fb390",
+    "other": "#8d97a2",
+}
+
+_LOCAL_SESSION_CACHE: dict[str, Any] = {"expires_at": 0.0, "codex": [], "claude": [], "gemini": []}
+_LIVE_PROCESS_CACHE: dict[str, Any] = {"expires_at": 0.0, "sessions": []}
 USAGE_REFRESH_INTERVAL_SECONDS = 4.0
 TELEGRAM_POLL_INTERVAL_SECONDS = 2.2
 TELEGRAM_NOTIFICATION_COOLDOWN_SECONDS = 30.0
@@ -329,6 +352,19 @@ def fallback_response_choices(source: str, approval_type: str, summary: str) -> 
             "No, tell Codex what to do differently",
         ]
 
+    if lowered_source == "gemini":
+        if lowered_approval == "bash" or "bash" in lowered_summary:
+            return [
+                "Allow once",
+                "Allow for this Gemini session",
+                "No, tell Gemini what to do differently",
+            ]
+        return [
+            "Allow once",
+            "Allow for this Gemini session",
+            "No, tell Gemini what to do differently",
+        ]
+
     return []
 
 
@@ -370,7 +406,11 @@ def match_workspace_path(candidate: str | None, cwd: str | None) -> bool:
     if left == right:
         return True
     try:
-        return Path(left).resolve() == Path(right).resolve()
+        left_path = Path(left).resolve()
+        right_path = Path(right).resolve()
+        if left_path == right_path:
+            return True
+        return left_path in right_path.parents or right_path in left_path.parents
     except Exception:
         return left == right
 
@@ -502,6 +542,138 @@ def read_proc_fd_targets(pid: int | None) -> list[str]:
     except Exception:
         return []
     return targets
+
+
+def read_proc_cmdline(pid: int | None) -> list[str]:
+    if not pid:
+        return []
+    path = Path("/proc") / str(int(pid)) / "cmdline"
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return []
+    if not raw:
+        return []
+    return [
+        chunk.decode("utf-8", "ignore")
+        for chunk in raw.split(b"\0")
+        if chunk
+    ]
+
+
+def read_proc_cwd(pid: int | None) -> str | None:
+    if not pid:
+        return None
+    try:
+        return os.readlink(f"/proc/{int(pid)}/cwd")
+    except Exception:
+        return None
+
+
+def read_proc_tty(pid: int | None) -> str | None:
+    if not pid:
+        return None
+    try:
+        target = os.readlink(f"/proc/{int(pid)}/fd/0")
+    except Exception:
+        return None
+    return target if target.startswith("/dev/") and "(deleted)" not in target else None
+
+
+def read_proc_ppid(pid: int | None) -> int | None:
+    if not pid:
+        return None
+    try:
+        lines = (Path("/proc") / str(int(pid)) / "status").read_text(errors="ignore").splitlines()
+    except Exception:
+        return None
+    for line in lines:
+        if line.startswith("PPid:"):
+            try:
+                return int(line.split(":", 1)[1].strip())
+            except Exception:
+                return None
+    return None
+
+
+def process_ancestors(pid: int | None, max_depth: int = 8) -> list[dict[str, Any]]:
+    current = int(pid) if pid else 0
+    items: list[dict[str, Any]] = []
+    for _ in range(max_depth):
+        if not current:
+            break
+        argv = read_proc_cmdline(current)
+        if not argv:
+            break
+        items.append({"pid": current, "argv": argv})
+        parent = read_proc_ppid(current)
+        if not parent or parent == current:
+            break
+        current = parent
+    return items
+
+
+def detect_terminal_from_ancestors(ancestors: list[dict[str, Any]]) -> str | None:
+    candidates = (
+        "konsole",
+        "kitty",
+        "wezterm",
+        "ghostty",
+        "alacritty",
+        "code-insiders",
+        "code",
+        "cursor",
+        "vscode",
+        "gnome-terminal",
+        "xfce4-terminal",
+        "tilix",
+        "xterm",
+    )
+    for item in ancestors:
+        argv = item.get("argv") if isinstance(item, dict) else None
+        if not isinstance(argv, list):
+            continue
+        for token in argv:
+            basename = Path(normalize_text(token).lower()).name
+            if basename in candidates:
+                return basename
+    return None
+
+
+LIVE_SCAN_NONINTERACTIVE = {
+    "claude": {"-p", "--print", "--help", "--version", "mcp"},
+    "codex": {"exec", "review", "--help", "--version"},
+    "gemini": {"--help", "--version", "-p", "--prompt", "hooks", "skills", "extensions", "mcp"},
+}
+
+
+def classify_live_agent(argv: list[str]) -> str | None:
+    if not argv:
+        return None
+    lowered = [normalize_text(arg).lower() for arg in argv]
+    if any(
+        "vibeisland.py" in arg or "claude-hook" in arg or "codex-hook" in arg or "codex-notify" in arg or "gemini-hook" in arg
+        for arg in lowered
+    ):
+        return None
+    for source in ("claude", "codex", "gemini"):
+        for index, token in enumerate(lowered):
+            token_name = Path(token).name
+            matches_source = token_name == source
+            if source == "gemini":
+                matches_source = (
+                    matches_source
+                    or token_name == "gemini.js"
+                    or "@google/gemini-cli" in token
+                    or token.endswith("/gemini.js")
+                )
+            if not matches_source:
+                continue
+            next_token = lowered[index + 1] if index + 1 < len(lowered) else ""
+            if next_token in LIVE_SCAN_NONINTERACTIVE[source]:
+                return None
+            return source
+    return None
 
 
 def extract_session_id_from_path(path_value: str | None) -> str:
@@ -826,9 +998,11 @@ def load_live_claude_context(pid: int | None, cwd: str | None) -> dict[str, Any]
         if prompt:
             break
 
-    label_seed = first_text(prompt, session_id)
-    label = normalize_task_label_candidate(label_seed) or truncate(label_seed, 52)
+    label_seed = first_text(prompt, preview_lines[0] if preview_lines else "", session_id)
     resolved_cwd = first_text(meta.get("cwd"), cwd)
+    label = normalize_task_label_candidate(label_seed) or truncate(label_seed, 52)
+    if not label or label == session_id:
+        label = f"Claude @ {workspace_name(resolved_cwd) or 'workspace'}"
 
     return {
         "session_id": session_id,
@@ -843,6 +1017,204 @@ def load_live_claude_context(pid: int | None, cwd: str | None) -> dict[str, Any]
         "mtime": project_path.stat().st_mtime if project_path and project_path.exists() else 0.0,
         "transcript_path": str(project_path) if project_path else "",
     }
+
+
+def provider_key_for_source(source: str | None, *, is_collab: bool = False) -> str:
+    if is_collab:
+        return "collab"
+    lowered = normalize_text(source).lower()
+    if lowered == "claude":
+        return "claude"
+    if lowered == "codex":
+        return "codex"
+    if lowered == "gemini":
+        return "gemini"
+    return "other"
+
+
+def provider_label_for_key(provider_key: str | None) -> str:
+    return PROVIDER_SECTION_LABELS.get(normalize_text(provider_key).lower(), "Other")
+
+
+def provider_accent_for_key(provider_key: str | None) -> str:
+    return PROVIDER_SECTION_ACCENTS.get(normalize_text(provider_key).lower(), PROVIDER_SECTION_ACCENTS["other"])
+
+
+def gemini_project_roots() -> dict[str, str]:
+    payload = read_json_file_maybe(GEMINI_PROJECTS_PATH)
+    projects = payload.get("projects") if isinstance(payload.get("projects"), dict) else {}
+    roots: dict[str, str] = {}
+    for project_root, project_value in projects.items():
+        root_path = normalize_text(project_root)
+        value_path = normalize_text(project_value)
+        if root_path:
+            roots[root_path] = root_path
+        if value_path:
+            roots[value_path] = root_path or value_path
+    return roots
+
+
+def gemini_project_root_for_hash(project_hash: str | None, user_dir: Path | None = None) -> str:
+    normalized_hash = normalize_text(project_hash)
+    if normalized_hash:
+        mapping = gemini_project_roots()
+        resolved = mapping.get(normalized_hash)
+        if resolved:
+            return resolved
+    if user_dir is not None:
+        project_root_file = user_dir / ".project_root"
+        if project_root_file.exists():
+            try:
+                return normalize_text(project_root_file.read_text(encoding="utf-8", errors="ignore"))
+            except Exception:
+                return ""
+    return ""
+
+
+def find_gemini_chat_file_for_pid(pid: int | None) -> Path | None:
+    for target in read_proc_fd_targets(pid):
+        if "/.gemini/tmp/" not in target or "/chats/" not in target or not target.endswith(".json"):
+            continue
+        path = Path(target)
+        if path.exists():
+            return path
+    return None
+
+
+def extract_gemini_message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return normalize_text(content)
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = normalize_text(item.get("text") or item.get("content"))
+                if text:
+                    parts.append(text)
+            elif isinstance(item, str):
+                text = normalize_text(item)
+                if text:
+                    parts.append(text)
+        return normalize_text(" ".join(parts))
+    return ""
+
+
+def gemini_preview_from_chat_file(path: Path | None) -> tuple[list[str], str, int]:
+    if path is None or not path.exists():
+        return [], "", 0
+    payload = read_json_file_maybe(path)
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    preview_lines: list[str] = []
+    latest_prompt = ""
+    token_total = 0
+
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        message_type = normalize_text(message.get("type")).lower()
+        text = extract_gemini_message_text(message)
+        if message_type == "user":
+            if text:
+                latest_prompt = text
+            append_preview_line(preview_lines, text, prefix="You: ")
+        elif message_type == "gemini":
+            append_preview_line(preview_lines, text)
+        elif message_type == "info":
+            append_preview_line(preview_lines, text)
+
+        tokens = message.get("tokens")
+        if isinstance(tokens, dict):
+            for key in ("input", "output", "input_tokens", "output_tokens", "total"):
+                try:
+                    token_total += int(tokens.get(key) or 0)
+                except Exception:
+                    continue
+
+        for tool_call in message.get("toolCalls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
+            command = normalize_text(args.get("command"))
+            description = normalize_text(args.get("description"))
+            append_preview_line(preview_lines, command or description, prefix="$ ")
+            result_display = normalize_text(tool_call.get("resultDisplay"))
+            if result_display:
+                append_preview_line(preview_lines, result_display)
+
+    return recent_meaningful_lines(preview_lines, limit=6), latest_prompt, token_total
+
+
+def scan_recent_gemini_records(limit_files: int = 80) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if not GEMINI_TMP_DIR.exists():
+        return records
+
+    chat_paths = sorted(
+        GEMINI_TMP_DIR.glob("*/chats/*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )[: max(limit_files, 40)]
+
+    for path in chat_paths:
+        payload = read_json_file_maybe(path)
+        session_id = normalize_text(payload.get("sessionId"))
+        if not session_id:
+            continue
+        user_dir = path.parent.parent
+        cwd = gemini_project_root_for_hash(payload.get("projectHash"), user_dir)
+        preview_lines, prompt, token_total = gemini_preview_from_chat_file(path)
+        label_seed = first_text(prompt, preview_lines[0] if preview_lines else "", session_id)
+        label = normalize_task_label_candidate(label_seed) or truncate(label_seed, 52)
+        records.append(
+            {
+                "session_id": session_id,
+                "cwd": cwd,
+                "prompt": prompt,
+                "label": label,
+                "preview_lines": recent_meaningful_lines(preview_lines or ([truncate(prompt, 120)] if prompt else []), limit=6),
+                "rate_limits": {},
+                "tokens_total": token_total,
+                "mtime": path.stat().st_mtime,
+                "transcript_path": str(path),
+            }
+        )
+
+    records.sort(key=lambda item: item.get("mtime", 0), reverse=True)
+    return records
+
+
+def load_live_gemini_context(pid: int | None, cwd: str | None) -> dict[str, Any]:
+    chat_path = find_gemini_chat_file_for_pid(pid)
+    if chat_path is not None and chat_path.exists():
+        payload = read_json_file_maybe(chat_path)
+        preview_lines, prompt, token_total = gemini_preview_from_chat_file(chat_path)
+        label_seed = first_text(prompt, preview_lines[0] if preview_lines else "", payload.get("sessionId"))
+        label = normalize_task_label_candidate(label_seed) or truncate(label_seed, 52)
+        user_dir = chat_path.parent.parent
+        resolved_cwd = first_text(
+            gemini_project_root_for_hash(payload.get("projectHash"), user_dir),
+            cwd,
+        )
+        return {
+            "session_id": normalize_text(payload.get("sessionId")),
+            "cwd": resolved_cwd,
+            "prompt": prompt,
+            "label": label,
+            "preview_lines": recent_meaningful_lines(preview_lines or ([truncate(prompt, 120)] if prompt else []), limit=6),
+            "rate_limits": {},
+            "tokens_total": token_total,
+            "mtime": chat_path.stat().st_mtime,
+            "transcript_path": str(chat_path),
+        }
+
+    normalized_cwd = normalize_text(cwd)
+    records = scan_recent_gemini_records()
+    if normalized_cwd:
+        for record in records:
+            if match_workspace_path(record.get("cwd"), normalized_cwd):
+                return record
+    return records[0] if records else {}
 
 
 def scan_recent_codex_records(limit_files: int = 80) -> list[dict[str, Any]]:
@@ -952,35 +1324,150 @@ def scan_recent_claude_records(limit_items: int = 400) -> list[dict[str, Any]]:
 def local_session_records() -> dict[str, list[dict[str, Any]]]:
     now = time.time()
     if _LOCAL_SESSION_CACHE["expires_at"] > now:
-        return {"codex": _LOCAL_SESSION_CACHE["codex"], "claude": _LOCAL_SESSION_CACHE["claude"]}
+        return {
+            "codex": _LOCAL_SESSION_CACHE["codex"],
+            "claude": _LOCAL_SESSION_CACHE["claude"],
+            "gemini": _LOCAL_SESSION_CACHE["gemini"],
+        }
     codex_records = scan_recent_codex_records()
     claude_records = scan_recent_claude_records()
+    gemini_records = scan_recent_gemini_records()
     _LOCAL_SESSION_CACHE.update({
         "expires_at": now + 5.0,
         "codex": codex_records,
         "claude": claude_records,
+        "gemini": gemini_records,
     })
-    return {"codex": codex_records, "claude": claude_records}
+    return {"codex": codex_records, "claude": claude_records, "gemini": gemini_records}
+
+
+def discover_local_live_sessions(existing_sessions: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    now = time.time()
+    cached_sessions = _LIVE_PROCESS_CACHE.get("sessions")
+    if _LIVE_PROCESS_CACHE.get("expires_at", 0.0) > now and isinstance(cached_sessions, list):
+        return [dict(item) for item in cached_sessions if isinstance(item, dict)]
+
+    known_ids = {
+        normalize_text(item.get("id"))
+        for item in (existing_sessions or [])
+        if isinstance(item, dict) and normalize_text(item.get("id"))
+    }
+    results: list[dict[str, Any]] = []
+
+    try:
+        proc_entries = list(Path("/proc").iterdir())
+    except Exception:
+        proc_entries = []
+
+    from datetime import datetime, timezone
+
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    for entry in proc_entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            pid = int(entry.name)
+        except Exception:
+            continue
+
+        argv = read_proc_cmdline(pid)
+        source = classify_live_agent(argv)
+        if source is None:
+            continue
+
+        session_id = f"live::{source}::{pid}"
+        if session_id in known_ids:
+            continue
+
+        tty = read_proc_tty(pid)
+        if not tty:
+            continue
+
+        cwd = read_proc_cwd(pid) or ""
+        terminal = detect_terminal_from_ancestors(process_ancestors(pid))
+        recovered = recover_local_session_hint(source, cwd, pid=pid)
+        preview_lines = recent_meaningful_lines(recovered.get("preview_lines"), 6)
+        label = normalize_text(
+            recovered.get("label")
+            or recovered.get("prompt")
+            or recovered.get("summary")
+            or workspace_name(cwd)
+        )
+        if not label or is_generic_title(label, source, cwd):
+            label = f"{source.title()} @ {workspace_name(cwd) or 'workspace'}"
+        summary = normalize_text(preview_lines[-1] if preview_lines else recovered.get("summary"))
+        if not summary:
+            summary = f"Detected live {source.title()} process" + (f" via {terminal}" if terminal else "")
+
+        results.append(
+            {
+                "id": session_id,
+                "title": label,
+                "collapsed_headline": label,
+                "task_label": label,
+                "source": source,
+                "workspace": cwd,
+                "cwd": cwd,
+                "state": "running",
+                "summary": summary,
+                "attention_score": 20,
+                "updated_at": now_iso,
+                "created_at": now_iso,
+                "last_event_kind": "session_heartbeat",
+                "interaction": {},
+                "review": {},
+                "identity": {
+                    "source_session_id": normalize_text(recovered.get("session_id")),
+                    "backend_session_id": normalize_text(recovered.get("session_id")),
+                    "artifact_kind": f"{source}_transcript",
+                    "artifact_path": normalize_text(recovered.get("transcript_path")),
+                    "title_source": "local_live_scan",
+                },
+                "peek": {
+                    "supported": True,
+                    "source_session_id": normalize_text(recovered.get("session_id")),
+                    "backend_session_id": normalize_text(recovered.get("session_id")),
+                    "transcript_path": normalize_text(recovered.get("transcript_path")),
+                    "preview_lines": preview_lines,
+                    "input_hint": "Type a follow-up and press send",
+                },
+                "jump_target": {
+                    "terminal": terminal,
+                    "tty": tty,
+                    "pid": pid,
+                    "tmux_session": None,
+                    "tmux_window": None,
+                    "tmux_pane": None,
+                },
+            }
+        )
+
+    _LIVE_PROCESS_CACHE.update({"expires_at": now + 2.0, "sessions": [dict(item) for item in results]})
+    return results
 
 
 def recover_local_session_hint(source: str, cwd: str | None, *, pid: int | None = None) -> dict[str, Any]:
     normalized_source = normalize_text(source).lower()
     normalized_cwd = normalize_text(cwd)
-    if normalized_source not in {"codex", "claude"}:
+    if normalized_source not in {"codex", "claude", "gemini"}:
         return {}
     if normalized_source == "codex":
         exact = load_live_codex_context(pid, normalized_cwd)
-    else:
+    elif normalized_source == "claude":
         exact = load_live_claude_context(pid, normalized_cwd)
+    else:
+        exact = load_live_gemini_context(pid, normalized_cwd)
     if exact:
         return exact
     if not normalized_cwd:
-        return {}
+        records = local_session_records().get(normalized_source, [])
+        return records[0] if records else {}
     records = local_session_records().get(normalized_source, [])
     for record in records:
         if match_workspace_path(record.get("cwd"), normalized_cwd):
             return record
-    return {}
+    return records[0] if records else {}
 
 
 def is_generic_title(title: str, source: str, cwd: str | None) -> bool:
@@ -1594,7 +2081,8 @@ def collect_usage_totals() -> dict[str, int]:
     records = local_session_records()
     codex_total = sum(int(item.get("tokens_total") or 0) for item in records.get("codex", []))
     claude_total = sum(int(item.get("tokens_total") or 0) for item in records.get("claude", []))
-    return {"codex": codex_total, "claude": claude_total}
+    gemini_total = sum(int(item.get("tokens_total") or 0) for item in records.get("gemini", []))
+    return {"codex": codex_total, "claude": claude_total, "gemini": gemini_total}
 
 
 def usage_display_snapshot(
@@ -1605,7 +2093,7 @@ def usage_display_snapshot(
     del started_at
     baseline_totals = baseline or {}
     current_totals = collect_usage_totals()
-    active_records: dict[str, list[dict[str, Any]]] = {"codex": [], "claude": []}
+    active_records: dict[str, list[dict[str, Any]]] = {"codex": [], "claude": [], "gemini": []}
     seen: set[tuple[str, str]] = set()
 
     for session in sessions or []:
@@ -1643,8 +2131,10 @@ def usage_display_snapshot(
     secondary = codex_rate_limits.get("secondary") if isinstance(codex_rate_limits, dict) else {}
     codex_delta = max(0, current_totals.get("codex", 0) - baseline_totals.get("codex", 0))
     claude_delta = max(0, current_totals.get("claude", 0) - baseline_totals.get("claude", 0))
+    gemini_delta = max(0, current_totals.get("gemini", 0) - baseline_totals.get("gemini", 0))
     claude_tokens_5h = sum(int(item.get("usage_5h") or 0) for item in active_records["claude"])
     claude_tokens_7d = sum(int(item.get("usage_7d") or 0) for item in active_records["claude"])
+    gemini_tokens_total = sum(int(item.get("tokens_total") or 0) for item in active_records["gemini"])
     codex_mode = "tokens" if codex_auth_mode() == "api_key" else "quota"
     claude_statusline = load_claude_statusline_snapshot()
     claude_rate_limits = claude_statusline.get("rate_limits") if isinstance(claude_statusline.get("rate_limits"), dict) else {}
@@ -1673,6 +2163,14 @@ def usage_display_snapshot(
             "sevenDay": f"{claude_seven_day_remaining}% left" if claude_seven_day_remaining is not None else "unavailable",
             "sessionTokens": claude_delta,
             "detail": "Claude.ai quota" if claude_mode == "quota" else f"5h used {claude_tokens_5h:,} / 7d used {claude_tokens_7d:,}",
+        },
+        "gemini": {
+            "label": "Gemini",
+            "mode": "estimate",
+            "fiveHour": "unavailable",
+            "sevenDay": "unavailable",
+            "sessionTokens": gemini_delta,
+            "detail": f"Transcript tokens {gemini_tokens_total:,}" if gemini_tokens_total else "Quota unavailable from local Gemini state",
         },
     }
 
@@ -1794,12 +2292,96 @@ def snapshot_signature(snapshot: dict[str, Any], sessions: list[dict[str, Any]])
     )
 
 
+def provider_sort_key(provider_key: str | None) -> int:
+    normalized = normalize_text(provider_key).lower()
+    try:
+        return PROVIDER_SECTION_ORDER.index(normalized)
+    except ValueError:
+        return len(PROVIDER_SECTION_ORDER)
+
+
+def grouped_session_sort_key(session: dict[str, Any]) -> tuple[int, int, int, str]:
+    state = normalize_text(session.get("state"))
+    if state in {"Blocked", "Waiting User"} or bool(session.get("needsResponse")):
+        state_order = 0
+    elif state == "Running":
+        state_order = 1
+    elif state in {"Completed", "Idle"}:
+        state_order = 2
+    else:
+        state_order = 3
+    age_seconds = int(session.get("ageSeconds", -1) or -1)
+    if age_seconds < 0:
+        age_seconds = 999999
+    return (
+        state_order,
+        -int(session.get("attention", 0) or 0),
+        age_seconds,
+        normalize_text(session.get("displayTitle") or session.get("taskLabel") or session.get("title")),
+    )
+
+
+def flat_session_sort_key(session: dict[str, Any]) -> tuple[int, int, int, int, str]:
+    provider_key = normalize_text(session.get("providerKey")).lower() or provider_key_for_source(
+        session.get("source"),
+        is_collab=bool(session.get("isCollabSession")),
+    )
+    grouped_key = grouped_session_sort_key(session)
+    return (
+        grouped_key[0],
+        grouped_key[1],
+        grouped_key[2],
+        provider_sort_key(provider_key),
+        grouped_key[3],
+    )
+
+
+def build_grouped_session_entries(
+    sessions: list[dict[str, Any]],
+    collapsed_state: dict[str, bool] | None = None,
+) -> list[dict[str, Any]]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    collapsed = collapsed_state or {}
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        provider_key = normalize_text(session.get("providerKey")).lower() or provider_key_for_source(
+            session.get("source"),
+            is_collab=bool(session.get("isCollabSession")),
+        )
+        buckets.setdefault(provider_key, []).append(session)
+
+    entries: list[dict[str, Any]] = []
+    ordered_keys = sorted(buckets.keys(), key=provider_sort_key)
+    for provider_key in ordered_keys:
+        provider_sessions = sorted(buckets.get(provider_key, []), key=grouped_session_sort_key)
+        is_collapsed = bool(collapsed.get(provider_key, False))
+        entries.append(
+            {
+                "entryType": "section",
+                "providerKey": provider_key,
+                "providerLabel": provider_label_for_key(provider_key),
+                "count": len(provider_sessions),
+                "collapsed": is_collapsed,
+                "accent": provider_accent_for_key(provider_key),
+            }
+        )
+        if is_collapsed:
+            continue
+        for session in provider_sessions:
+            item = dict(session)
+            item["entryType"] = "session"
+            entries.append(item)
+    return entries
+
+
 class Backend(QObject):
     snapshotReady = pyqtSignal(object)
     usageSnapshotReady = pyqtSignal(object)
     peekPreviewReady = pyqtSignal(str, object)
     snapshotChanged = pyqtSignal()
     sessionsChanged = pyqtSignal()
+    groupedSessionsChanged = pyqtSignal()
     timelineChanged = pyqtSignal()
     responseFinished = pyqtSignal(str, bool, str)
     headlineChanged = pyqtSignal()
@@ -1825,6 +2407,7 @@ class Backend(QObject):
         self._snapshot_signature = None
         self._raw_sessions = []
         self._sessions = []
+        self._grouped_sessions = []
         self._timeline = []
         self._prompt_session = {}
         self._suppressed_prompt_key = ""
@@ -1862,6 +2445,7 @@ class Backend(QObject):
         self._telegram_notified_sessions: dict[str, dict[str, Any]] = {}
         self._telegram_reply_targets: dict[str, str] = {}
         self._telegram_response_feedback: dict[str, tuple[str, str, str]] = {}
+        self._grouped_section_collapsed: dict[str, bool] = {}
         self._loaded_prefs = self._load_prefs()
         self._apply_loaded_prefs()
         self.snapshotReady.connect(self._apply_snapshot)
@@ -1873,12 +2457,17 @@ class Backend(QObject):
         self._telegram_worker = threading.Thread(target=self._telegram_loop, daemon=True)
         self._telegram_worker.start()
         self.refresh()
+        self._request_live_reconcile()
         if self._quiet_mode:
             self._send_quiet_mode()
 
     @pyqtProperty("QVariantList", notify=sessionsChanged)
     def sessions(self):
         return self._sessions
+
+    @pyqtProperty("QVariantList", notify=groupedSessionsChanged)
+    def groupedSessions(self):
+        return self._grouped_sessions
 
     @pyqtProperty("QVariantList", notify=timelineChanged)
     def timeline(self):
@@ -1984,6 +2573,10 @@ class Backend(QObject):
     def telegramStatus(self):
         return self._telegram_status
 
+    @pyqtProperty("QVariantMap", notify=groupedSessionsChanged)
+    def groupedSectionCollapsed(self):
+        return dict(self._grouped_section_collapsed)
+
     @pyqtSlot()
     def toggleExpanded(self):
         self._expanded = not self._expanded
@@ -2025,6 +2618,17 @@ class Backend(QObject):
         self.promptAttentionChanged.emit()
         self._write_view_prefs()
         self._play_sound("toggle")
+
+    @pyqtSlot(str)
+    def toggleProviderSection(self, provider_key: str):
+        normalized = normalize_text(provider_key).lower()
+        if not normalized:
+            return
+        current = bool(self._grouped_section_collapsed.get(normalized, False))
+        self._grouped_section_collapsed[normalized] = not current
+        self._grouped_sessions = build_grouped_session_entries(self._sessions, self._grouped_section_collapsed)
+        self.groupedSessionsChanged.emit()
+        self._write_view_prefs()
 
     @pyqtSlot()
     def summonWindow(self):
@@ -2283,6 +2887,16 @@ class Backend(QObject):
                 continue
             decision = request.get("decision") if isinstance(request.get("decision"), dict) else {}
             if normalize_text(decision.get("action")):
+                continue
+            try:
+                age_seconds = max(0.0, time.time() - request_path.stat().st_mtime)
+            except Exception:
+                age_seconds = 0.0
+            if age_seconds > APPROVAL_REQUEST_STALE_SECONDS:
+                try:
+                    request_path.unlink()
+                except Exception:
+                    pass
                 continue
             pending.append(request)
         return pending
@@ -2631,6 +3245,29 @@ class Backend(QObject):
         snapshot = self.fetch_snapshot_once()
         self._apply_snapshot(snapshot)
 
+    def _request_live_reconcile(self) -> None:
+        if not TOOLS_BRIDGE.exists():
+            return
+
+        def run_reconcile() -> None:
+            try:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(TOOLS_BRIDGE),
+                        "reconcile",
+                        "--socket",
+                        self._socket_path,
+                    ],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=run_reconcile, daemon=True).start()
+
     def _build_usage_snapshot(self, sessions: list[dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
         return usage_display_snapshot(
             self._started_at,
@@ -2654,6 +3291,7 @@ class Backend(QObject):
     def _apply_snapshot(self, snapshot):
         collab_sessions = collaboration_raw_sessions()
         snapshot_sessions = snapshot.get("sessions", [])
+        local_live_sessions = discover_local_live_sessions(snapshot_sessions)
         pending_approval_requests = self._pending_approval_requests()
         approval_sessions = [
             session
@@ -2663,11 +3301,13 @@ class Backend(QObject):
             )
             if isinstance(session, dict)
         ]
-        sessions = snapshot_sessions + collab_sessions + approval_sessions
+        sessions = snapshot_sessions + local_live_sessions + collab_sessions + approval_sessions
         enriched_snapshot = dict(snapshot)
         enriched_snapshot["sessions"] = sessions
         enriched_snapshot["pending_approval_requests"] = pending_approval_requests
         enriched_snapshot["active_count"] = int(snapshot.get("active_count", len(snapshot_sessions))) + len(
+            [session for session in local_live_sessions if normalize_text(session.get("state")).lower() != "completed"]
+        ) + len(
             [session for session in collab_sessions if normalize_text(session.get("state")).lower() != "completed"]
         )
         enriched_snapshot["blocked_count"] = int(snapshot.get("blocked_count", 0)) + len(
@@ -2698,6 +3338,7 @@ class Backend(QObject):
         for session in sessions:
             collaboration = session.get("collaboration") if isinstance(session.get("collaboration"), dict) else {}
             if collaboration:
+                provider_key = "collab"
                 updated_at = str(session.get("updated_at") or snapshot.get("generated_at") or "")
                 seconds_since_update = age_seconds(updated_at)
                 state_text = str(session.get("state") or "running").replace("_", " ").title()
@@ -2714,6 +3355,9 @@ class Backend(QObject):
                     "workspaceLabel": workspace_name(collaboration.get("workspace")),
                     "terminalLabel": "",
                     "source": "Collab",
+                    "providerKey": provider_key,
+                    "providerLabel": provider_label_for_key(provider_key),
+                    "providerAccent": provider_accent_for_key(provider_key),
                     "state": state_text,
                     "summary": normalize_text(session.get("summary")) or "Collaboration ready",
                     "attention": int(session.get("attention_score", 0)),
@@ -2767,6 +3411,7 @@ class Backend(QObject):
                 continue
 
             raw_source = str(session.get("source") or "")
+            provider_key = provider_key_for_source(raw_source)
             jump_target = session.get("jump_target") if isinstance(session.get("jump_target"), dict) else {}
             jump_pid = extract_live_process_pid(str(session.get("id") or "")) or jump_target.get("pid")
             try:
@@ -2893,6 +3538,9 @@ class Backend(QObject):
                 "workspaceLabel": workspace_name(str(session.get("cwd") or session.get("workspace") or "")),
                 "terminalLabel": first_text(jump_target.get("terminal"), jump_target.get("tty")),
                 "source": raw_source.replace("_", " ").title(),
+                "providerKey": provider_key,
+                "providerLabel": provider_label_for_key(provider_key),
+                "providerAccent": provider_accent_for_key(provider_key),
                 "state": state_text,
                 "summary": display_summary or str(session.get("summary") or ""),
                 "attention": int(session.get("attention_score", 0)),
@@ -3033,7 +3681,7 @@ class Backend(QObject):
                     )
                 )
 
-        pretty_sessions = dedupe_display_sessions(pretty_sessions)
+        pretty_sessions = sorted(dedupe_display_sessions(pretty_sessions), key=flat_session_sort_key)
         prompt_session = next((item for item in pretty_sessions if item.get("needsResponse")), {})
         previous_prompt_present = bool(self._prompt_session)
         previous_prompt_id = normalize_text(self._prompt_session.get("id") if isinstance(self._prompt_session, dict) else "")
@@ -3041,6 +3689,7 @@ class Backend(QObject):
         previous_prompt_key = self._prompt_key_for_session(self._prompt_session)
 
         self._sessions = pretty_sessions
+        self._grouped_sessions = build_grouped_session_entries(pretty_sessions, self._grouped_section_collapsed)
         self._prompt_session = prompt_session
         self._active_count = len(pretty_sessions)
         self._blocked_count = sum(
@@ -3083,6 +3732,7 @@ class Backend(QObject):
             self._suppressed_prompt_key = ""
 
         self.sessionsChanged.emit()
+        self.groupedSessionsChanged.emit()
         self.timelineChanged.emit()
         self.countsChanged.emit()
         self.headlineChanged.emit()
@@ -3401,7 +4051,7 @@ class Backend(QObject):
         if state_text not in {"Blocked", "Waiting User"}:
             return False
         source_text = normalize_text(session.get("source")).lower()
-        if source_text not in {"claude", "codex"}:
+        if source_text not in {"claude", "codex", "gemini"}:
             return False
         choices = session.get("choices") if isinstance(session.get("choices"), list) else []
         if len(choices) == 0:
@@ -3579,6 +4229,12 @@ class Backend(QObject):
         self._focus_mode = bool(prefs.get("focus_mode", False))
         self._pinned = bool(prefs.get("pinned", False))
         self._prompt_attention_enabled = bool(prefs.get("prompt_attention_enabled", True))
+        grouped_sections = prefs.get("grouped_sections") if isinstance(prefs.get("grouped_sections"), dict) else {}
+        self._grouped_section_collapsed = {
+            normalize_text(key).lower(): bool(value)
+            for key, value in grouped_sections.items()
+            if normalize_text(key)
+        }
         telegram = prefs.get("telegram", {}) if isinstance(prefs.get("telegram"), dict) else {}
         self._telegram_bot_token = str(telegram.get("bot_token") or "").strip()
         self._telegram_chat_id = str(telegram.get("chat_id") or "").strip()
@@ -3598,6 +4254,7 @@ class Backend(QObject):
         self.pinnedChanged.emit()
         self.promptAttentionChanged.emit()
         self.telegramChanged.emit()
+        self.groupedSessionsChanged.emit()
 
     def _available_screen_geometry(self) -> tuple[int, int, int, int]:
         screen = None
@@ -3648,6 +4305,7 @@ class Backend(QObject):
                 "focus_mode": self._focus_mode,
                 "pinned": self._pinned,
                 "prompt_attention_enabled": self._prompt_attention_enabled,
+                "grouped_sections": self._grouped_section_collapsed,
                 "telegram": {
                     "enabled": self._telegram_enabled,
                     "bot_token": self._telegram_bot_token,

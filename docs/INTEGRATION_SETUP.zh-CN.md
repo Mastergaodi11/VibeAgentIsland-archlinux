@@ -4,7 +4,7 @@
 
 维护说明：以后只要本文件或英文版发生变更，必须同步更新中英文两个版本。
 
-本文档说明：在另一台 Linux 机器上，要让 `Vibe Island` 正常与 `Claude Code` 和 `Codex` 联动，需要哪些本地 CLI 配置。
+本文档说明：在另一台 Linux 机器上，要让 `Vibe Island` 正常与 `Claude Code`、`Codex` 和 `Gemini CLI` 联动，需要哪些本地 CLI 配置。
 
 ## 目标
 
@@ -13,6 +13,8 @@
 - `Claude Code` 需要通过 `~/.claude/settings.json` 把生命周期和审批事件转发出来
 - 如果希望灵动岛显示 Claude 的 5 小时 / 7 天剩余额度，还需要通过 `statusLine` 暴露 `rate_limits`
 - `Codex` 需要通过 `~/.codex/config.toml` 和 `~/.codex/hooks.json` 把生命周期事件转发出来
+- `Gemini CLI` 需要通过 `~/.gemini/settings.json` 把生命周期 / 工具 / agent 事件转发出来
+- `Gemini CLI` 目前没有稳定的本地 5 小时 / 7 天配额窗口来源，所以灵动岛只能显示 Gemini 的 transcript / session token 总量
 
 本项目已经提供了一键安装器：
 
@@ -191,6 +193,55 @@ codex_hooks = true
 }
 ```
 
+## Gemini CLI
+
+配置文件：
+
+- `~/.gemini/settings.json`
+
+### Gemini 必需的 hooks
+
+下面这些 Gemini 事件应该调用：
+
+```bash
+/usr/bin/python "/path/to/vibeisland-linux/tools/vibeisland.py" gemini-hook
+```
+
+当前项目会安装这些 Gemini 事件：
+
+- `SessionStart`
+- `SessionEnd`
+- `BeforeTool`
+- `AfterTool`
+- `BeforeAgent`
+- `AfterAgent`
+
+示例结构：
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+说明：
+
+- 当前公开版里的 Gemini 支持是“最小可用”路线
+- 目标覆盖 live 会话可见、审批 / 提问、jump、Telegram 与 peek
+- Gemini 的额度 HUD 目前不在公开版承诺范围里
+
 ## 在新机器上的推荐配置流程
 
 1. 克隆或复制 `vibeisland-linux`
@@ -213,7 +264,7 @@ python tools/vibeisland.py install all
 "forceLoginMethod": "claudeai"
 ```
 
-6. 重启 `claude` 和 `codex`
+6. 如果本机安装了 Gemini，也一并重启 `claude`、`codex` 和 `gemini`
 7. 通过统一启动器启动 Vibe Island：
 
 ```bash

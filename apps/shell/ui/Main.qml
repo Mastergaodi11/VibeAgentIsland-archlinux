@@ -46,6 +46,7 @@ Window {
     property bool restoringSessionScroll: false
     property bool modelUpdating: false
     property var sessionModelCache: []
+    property var groupedSessionModelCache: []
     property color surfaceBase: "#020304"
     property color surfacePanel: "#06080b"
     property color surfaceCard: "#090c10"
@@ -150,6 +151,13 @@ Window {
         return root.sessionModelCache
     }
 
+    function groupedItems() {
+        if (root.groupedSessionModelCache === undefined || root.groupedSessionModelCache === null) {
+            return []
+        }
+        return root.groupedSessionModelCache
+    }
+
     function syncSessionModel(preserveCurrentScroll) {
         if (preserveCurrentScroll === undefined) {
             preserveCurrentScroll = true
@@ -159,6 +167,7 @@ Window {
         }
         modelUpdating = true
         sessionModelCache = backend.sessions
+        groupedSessionModelCache = backend.groupedSessions
         restoreSessionScroll()
     }
 
@@ -534,11 +543,14 @@ Window {
             return "alert"
         }
         var provider = sessionProviderKey(session)
-        if (provider === "openai") {
+        if (provider === "codex") {
             return "codex"
         }
-        if (provider === "anthropic") {
+        if (provider === "claude") {
             return "claude"
+        }
+        if (provider === "gemini") {
+            return "gemini"
         }
         if (provider === "collab") {
             return "island"
@@ -557,11 +569,14 @@ Window {
             return "#b18a61"
         }
         var provider = sessionProviderKey(session)
-        if (provider === "openai") {
+        if (provider === "codex") {
             return "#7fa7be"
         }
-        if (provider === "anthropic") {
+        if (provider === "claude") {
             return "#b97a6e"
+        }
+        if (provider === "gemini") {
+            return "#9387da"
         }
         if (provider === "collab") {
             return "#6fb390"
@@ -573,17 +588,41 @@ Window {
         if (session === undefined || session === null) {
             return "default"
         }
+        var explicitProvider = safeText(session.providerKey).toLowerCase()
+        if (explicitProvider !== "") {
+            return explicitProvider
+        }
         if (!!session.isCollabSession) {
             return "collab"
         }
         var source = safeText(session.source).toLowerCase()
         if (source.indexOf("codex") !== -1 || source.indexOf("openai") !== -1) {
-            return "openai"
+            return "codex"
         }
         if (source.indexOf("claude") !== -1 || source.indexOf("anthropic") !== -1) {
-            return "anthropic"
+            return "claude"
+        }
+        if (source.indexOf("gemini") !== -1 || source.indexOf("google") !== -1) {
+            return "gemini"
         }
         return "default"
+    }
+
+    function sectionSpriteKind(providerKey) {
+        var provider = safeText(providerKey).toLowerCase()
+        if (provider === "claude") {
+            return "claude"
+        }
+        if (provider === "codex") {
+            return "codex"
+        }
+        if (provider === "gemini") {
+            return "gemini"
+        }
+        if (provider === "collab") {
+            return "island"
+        }
+        return "terminal"
     }
 
     function collapsedSpriteKind() {
@@ -1279,6 +1318,7 @@ Window {
         syncWindowGeometry(false)
         centerIfNeeded()
         root.sessionModelCache = backend.sessions
+        root.groupedSessionModelCache = backend.groupedSessions
         root.telegramDraftToken = backend.telegramBotToken
         root.telegramDraftChatId = backend.telegramChatId
         root.telegramDraftEnabled = backend.telegramEnabled
@@ -1311,6 +1351,14 @@ Window {
             if (root.peekSessionId !== "") {
                 backend.refreshPeekPreview(root.peekSessionId)
             }
+        }
+
+        function onGroupedSessionsChanged() {
+            if (root.peekSessionId !== "" || root.activePeekInputSessionId !== "" || root.typingPeekSessionId !== "") {
+                root.sessionSyncPending = true
+                return
+            }
+            root.syncSessionModel(true)
         }
 
         function onResponseFinished(sessionId, ok, message) {
@@ -2388,7 +2436,7 @@ Window {
                 anchors.leftMargin: 12
                 anchors.rightMargin: 12
                 visible: settingsOpen
-                height: visible ? 124 : 0
+                height: visible ? 160 : 0
                 radius: 14
                 color: "#0b0f13"
                 border.width: 1
@@ -2623,6 +2671,53 @@ Window {
                             }
                         }
                     }
+
+                    Row {
+                        width: parent.width
+                        spacing: 8
+
+                        Text {
+                            text: "INTEGRATIONS"
+                            color: root.inkStrong
+                            font.family: root.primaryFont
+                            font.pixelSize: 9
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                        }
+
+                        Item {
+                            width: Math.max(6, parent.width - 280)
+                            height: 1
+                        }
+
+                        Repeater {
+                            model: [
+                                { "label": "CLAUDE", "accent": root.accentRose },
+                                { "label": "CODEX", "accent": root.accentCyan },
+                                { "label": "GEMINI", "accent": "#9387da" }
+                            ]
+
+                            delegate: Rectangle {
+                                required property var modelData
+                                width: 58
+                                height: 18
+                                radius: 9
+                                color: "#0d1318"
+                                border.width: 1
+                                border.color: "#18212a"
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    color: modelData.accent
+                                    font.family: root.primaryFont
+                                    font.pixelSize: 7
+                                    font.bold: true
+                                    font.letterSpacing: 0.8
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2651,12 +2746,13 @@ Window {
                     Repeater {
                         model: [
                             { "key": "claude", "accent": root.accentRose },
-                            { "key": "codex", "accent": root.accentCyan }
+                            { "key": "codex", "accent": root.accentCyan },
+                            { "key": "gemini", "accent": root.accentViolet }
                         ]
 
                         delegate: Rectangle {
                             required property var modelData
-                            width: (usageBand.width - 22) / 2
+                            width: Math.floor((usageBand.width - 36) / 3)
                             height: 16
                             anchors.verticalCenter: parent.verticalCenter
                             radius: 8
@@ -2878,8 +2974,8 @@ Window {
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 8
                 clip: true
-                spacing: 5
-                model: root.sessionModelCache
+                spacing: 6
+                model: root.groupedSessionModelCache
                 reuseItems: true
                 cacheBuffer: 560
                 flickDeceleration: 520
@@ -2924,14 +3020,17 @@ Window {
                 delegate: Item {
                     id: delegateRoot
                     required property var modelData
+                    property bool isSectionEntry: root.safeText(modelData.entryType) === "section"
                     width: sessionList.width
-                    height: delegateRoot.visibleInFocus
-                            ? delegateRoot.baseHeight
-                                + (delegateRoot.showPeekPanel ? delegateRoot.peekPanelHeight + 8 : 0)
-                                + (delegateRoot.showResponsePanel ? delegateRoot.responsePanelHeight + 8 : 0)
-                                + (delegateRoot.responding ? 40 : 0)
-                            : 0
-                    visible: delegateRoot.visibleInFocus
+                    height: delegateRoot.isSectionEntry
+                            ? 28
+                            : (delegateRoot.visibleInFocus
+                               ? delegateRoot.baseHeight
+                                   + (delegateRoot.showPeekPanel ? delegateRoot.peekPanelHeight + 8 : 0)
+                                   + (delegateRoot.showResponsePanel ? delegateRoot.responsePanelHeight + 8 : 0)
+                                   + (delegateRoot.responding ? 40 : 0)
+                               : 0)
+                    visible: delegateRoot.isSectionEntry || delegateRoot.visibleInFocus
 
                     property bool urgent: root.isUrgent(modelData.state, modelData.attention) || modelData.stuck || modelData.stale
                     property bool visibleInFocus: root.sessionVisibleInFocus(delegateRoot.modelData)
@@ -2988,61 +3087,105 @@ Window {
                     }
 
                     Rectangle {
+                        visible: delegateRoot.isSectionEntry
                         anchors.fill: parent
-                        radius: 10
-                        color: delegateRoot.urgent ? "#070a0d" : "#050709"
-                        border.width: 1
-                        border.color: delegateRoot.urgent ? "#2a1e23" : "#141a20"
-                        opacity: 0.995
-                    }
+                        z: 3
+                        radius: 8
+                        color: "#05080b"
+                        border.width: 0
 
-                    onShowPeekPanelChanged: {
-                        if (showPeekPanel) {
-                            root.sessionSyncPending = true
-                            delegateRoot.syncPeekLocalDraft()
-                            delegateRoot.syncPeekInputText()
-                            delegateRoot.focusPeekComposer()
-                        } else if (delegateRoot.peekLocalDraftSessionId !== "") {
-                            delegateRoot.peekUserTyping = false
-                            root.setPeekDraft(delegateRoot.peekLocalDraftSessionId, delegateRoot.peekLocalDraft)
-                            if (root.activePeekInputSessionId === delegateRoot.peekLocalDraftSessionId) {
-                                root.activePeekInputSessionId = ""
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 4
+                            anchors.rightMargin: 4
+                            spacing: 8
+
+                            Rectangle {
+                                width: 18
+                                height: 18
+                                radius: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: "#090d11"
+                                border.width: 1
+                                border.color: "#1a2026"
+
+                                PixelSprite {
+                                    anchors.centerIn: parent
+                                    width: 11
+                                    height: 11
+                                    kind: root.sectionSpriteKind(delegateRoot.modelData.providerKey)
+                                    accent: root.safeText(delegateRoot.modelData.accent) !== "" ? delegateRoot.modelData.accent : root.accentSlate
+                                    glow: "#edf3f9"
+                                    secondary: "#29323a"
+                                }
                             }
-                            if (root.typingPeekSessionId === delegateRoot.peekLocalDraftSessionId) {
-                                root.typingPeekSessionId = ""
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.safeText(delegateRoot.modelData.providerLabel) + " (" + Number(delegateRoot.modelData.count || 0) + ")"
+                                color: root.safeText(delegateRoot.modelData.accent) !== "" ? delegateRoot.modelData.accent : root.inkStrong
+                                font.family: root.primaryFont
+                                font.pixelSize: 12
+                                font.bold: true
+                                font.letterSpacing: 0.8
+                                elide: Text.ElideRight
                             }
-                            root.flushDeferredSessionSync()
-                        }
-                    }
 
-                    onModelDataChanged: {
-                        if (!delegateRoot.showPeekPanel && !peekInput.activeFocus && !delegateRoot.peekUserTyping) {
-                            delegateRoot.syncPeekLocalDraft()
-                            delegateRoot.syncPeekInputText()
-                        }
-                    }
+                            Item {
+                                width: Math.max(0, parent.width - 160)
+                                height: 1
+                            }
 
-                    onPeekLocalDraftChanged: {
-                        if (!delegateRoot.peekUserTyping) {
-                            delegateRoot.syncPeekInputText()
-                        }
-                    }
+                            Rectangle {
+                                width: 58
+                                height: 18
+                                radius: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: "#0a0d11"
+                                border.width: 1
+                                border.color: "#171d23"
 
-                    Connections {
-                        target: root
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 5
 
-                        function onRequestPeekInputFocus(sessionId) {
-                            if (root.safeText(sessionId) === root.safeText(delegateRoot.modelData.id) && delegateRoot.showPeekPanel) {
-                                delegateRoot.syncPeekInputText()
-                                delegateRoot.focusPeekComposer()
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: delegateRoot.modelData.collapsed ? "SHOW" : "HIDE"
+                                        color: "#96a1aa"
+                                        font.family: root.primaryFont
+                                        font.pixelSize: 8
+                                        font.bold: true
+                                        font.letterSpacing: 0.8
+                                    }
+
+                                    PixelSprite {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 9
+                                        height: 9
+                                        kind: delegateRoot.modelData.collapsed ? "chevron-down" : "chevron-up"
+                                        accent: "#96a1aa"
+                                        glow: "#d9e0e7"
+                                        secondary: "#2f3942"
+                                        animate: false
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: backend.toggleProviderSection(root.safeText(delegateRoot.modelData.providerKey))
+                                }
                             }
                         }
                     }
 
                     Rectangle {
+                        visible: !delegateRoot.isSectionEntry
                         anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
+                        z: 1
                         width: 1.5
                         radius: 1
                         color: delegateRoot.accent
@@ -3050,9 +3193,11 @@ Window {
                     }
 
                     Rectangle {
+                        visible: !delegateRoot.isSectionEntry
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
+                        z: 1
                         anchors.topMargin: 1
                         anchors.leftMargin: 8
                         anchors.rightMargin: 8
@@ -3062,7 +3207,9 @@ Window {
                     }
 
                     Row {
+                        visible: !delegateRoot.isSectionEntry
                         id: rowLayout
+                        z: 3
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -3072,13 +3219,13 @@ Window {
                         height: delegateRoot.baseHeight - 15
                         spacing: 7
 
-                        Rectangle {
-                            width: 24
-                            height: 24
-                            radius: 7
-                            color: "#090c10"
-                            border.width: 1
-                            border.color: "#182028"
+                            Rectangle {
+                                width: 24
+                                height: 24
+                                radius: 7
+                                color: "#090c10"
+                                border.width: 1
+                                border.color: Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.16)
 
                             Rectangle {
                                 anchors.fill: parent
@@ -3239,29 +3386,29 @@ Window {
                                                           ? Qt.rgba(root.accentAmber.r, root.accentAmber.g, root.accentAmber.b, 0.06)
                                                           : Qt.rgba(root.accentGreen.r, root.accentGreen.g, root.accentGreen.b, 0.06)
 
-                                                Text {
-                                                    id: strategyValue
-                                                    anchors.centerIn: parent
-                                                    width: parent.width - 12
-                                                    text: root.sessionCollabStrategyLabel(delegateRoot.modelData)
-                                                    color: root.inkStrong
-                                                    font.family: root.primaryFont
-                                                    font.pixelSize: 6
-                                                    font.bold: true
-                                                    font.letterSpacing: 0.8
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    elide: Text.ElideRight
+                                            Text {
+                                                id: strategyValue
+                                                anchors.centerIn: parent
+                                                width: parent.width - 12
+                                                text: root.sessionCollabStrategyLabel(delegateRoot.modelData)
+                                                color: root.inkStrong
+                                                font.family: root.primaryFont
+                                                font.pixelSize: 6
+                                                font.bold: true
+                                                font.letterSpacing: 0.8
+                                                horizontalAlignment: Text.AlignHCenter
+                                                elide: Text.ElideRight
                                             }
                                         }
                                     }
 
-                                        Rectangle {
-                                            width: parent.width
-                                            height: recentHandoffContent.implicitHeight + 12
-                                            radius: 9
-                                            color: "#080b0f"
-                                            border.width: 1
-                                            border.color: "#ffffff05"
+                                    Rectangle {
+                                        width: parent.width
+                                        height: recentHandoffContent.implicitHeight + 12
+                                        radius: 9
+                                        color: "#080b0f"
+                                        border.width: 1
+                                        border.color: "#ffffff05"
 
                                         Column {
                                             id: recentHandoffContent
@@ -3519,10 +3666,69 @@ Window {
                     }
 
                     Rectangle {
-                        visible: delegateRoot.showPeekPanel
+                        visible: !delegateRoot.isSectionEntry
+                        anchors.fill: parent
+                        radius: 10
+                        z: -4
+                        color: delegateRoot.urgent
+                               ? Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.028)
+                               : "#050709"
+                        border.width: 1
+                        border.color: delegateRoot.urgent
+                                      ? Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.2)
+                                      : Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.12)
+                        opacity: 0.995
+                    }
+
+                    onShowPeekPanelChanged: {
+                        if (showPeekPanel) {
+                            root.sessionSyncPending = true
+                            delegateRoot.syncPeekLocalDraft()
+                            delegateRoot.syncPeekInputText()
+                            delegateRoot.focusPeekComposer()
+                        } else if (delegateRoot.peekLocalDraftSessionId !== "") {
+                            delegateRoot.peekUserTyping = false
+                            root.setPeekDraft(delegateRoot.peekLocalDraftSessionId, delegateRoot.peekLocalDraft)
+                            if (root.activePeekInputSessionId === delegateRoot.peekLocalDraftSessionId) {
+                                root.activePeekInputSessionId = ""
+                            }
+                            if (root.typingPeekSessionId === delegateRoot.peekLocalDraftSessionId) {
+                                root.typingPeekSessionId = ""
+                            }
+                            root.flushDeferredSessionSync()
+                        }
+                    }
+
+                    onModelDataChanged: {
+                        if (!delegateRoot.showPeekPanel && !peekInput.activeFocus && !delegateRoot.peekUserTyping) {
+                            delegateRoot.syncPeekLocalDraft()
+                            delegateRoot.syncPeekInputText()
+                        }
+                    }
+
+                    onPeekLocalDraftChanged: {
+                        if (!delegateRoot.peekUserTyping) {
+                            delegateRoot.syncPeekInputText()
+                        }
+                    }
+
+                    Connections {
+                        target: root
+
+                        function onRequestPeekInputFocus(sessionId) {
+                            if (root.safeText(sessionId) === root.safeText(delegateRoot.modelData.id) && delegateRoot.showPeekPanel) {
+                                delegateRoot.syncPeekInputText()
+                                delegateRoot.focusPeekComposer()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        visible: !delegateRoot.isSectionEntry && delegateRoot.showPeekPanel
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
+                        z: 2
                         anchors.leftMargin: 12
                         anchors.rightMargin: 12
                         anchors.bottomMargin: 8 + (delegateRoot.responding ? 40 : 0) + (delegateRoot.showResponsePanel ? delegateRoot.responsePanelHeight + 8 : 0)
@@ -3629,16 +3835,16 @@ Window {
                                         Repeater {
                                             model: root.sessionPeekLines(delegateRoot.modelData)
 
-                                                delegate: Text {
-                                                    required property var modelData
-                                                    width: parent.width
-                                                    text: root.safeText(modelData)
-                                                    color: "#eef2f6"
-                                                    font.family: root.monoFont
-                                                    font.pixelSize: 12
-                                                    lineHeight: 1.10
-                                                    wrapMode: Text.Wrap
-                                                }
+                                            delegate: Text {
+                                                required property var modelData
+                                                width: parent.width
+                                                text: root.safeText(modelData)
+                                                color: "#eef2f6"
+                                                font.family: root.monoFont
+                                                font.pixelSize: 12
+                                                lineHeight: 1.10
+                                                wrapMode: Text.Wrap
+                                            }
                                         }
                                     }
                                 }
@@ -3796,10 +4002,11 @@ Window {
                     }
 
                     Rectangle {
-                        visible: delegateRoot.showResponsePanel
+                        visible: !delegateRoot.isSectionEntry && delegateRoot.showResponsePanel
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
+                        z: 2
                         anchors.leftMargin: 14
                         anchors.rightMargin: 14
                         anchors.bottomMargin: 10 + (delegateRoot.responding ? 40 : 0)
@@ -4130,7 +4337,7 @@ Window {
                             }
 
                             Rectangle {
-                                visible: delegateRoot.responding
+                                visible: !delegateRoot.isSectionEntry && delegateRoot.responding
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.bottom: parent.bottom
@@ -4250,7 +4457,7 @@ Window {
 
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: "Launch Claude Code or Codex and the island will wake up."
+                        text: "Launch Claude Code, Codex, or Gemini and the island will wake up."
                         color: "#7b8189"
                         font.family: root.primaryFont
                         font.pixelSize: 11

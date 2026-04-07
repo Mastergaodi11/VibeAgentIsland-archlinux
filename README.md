@@ -2,7 +2,7 @@
 
 中文说明：[`README.zh-CN.md`](./README.zh-CN.md)
 
-Vibe Island for Linux is a local-first floating “agent island” for Linux desktops. It watches live Claude Code and Codex sessions, pulls urgent approvals back into view, lets you jump to the right terminal, and keeps the core workflow on your own machine.
+Vibe Island for Linux is a local-first floating “agent island” for Linux desktops. It watches live Claude Code, Codex, and Gemini CLI sessions, pulls urgent approvals back into view, lets you jump to the right terminal, and keeps the core workflow on your own machine.
 
 ## Release Status
 
@@ -12,11 +12,13 @@ This first GitHub release is a usable beta for real local workflows, but it is s
 
 ## What It Does
 
-- monitors multiple Claude Code / Codex sessions in one floating shell
+- monitors multiple Claude Code / Codex / Gemini CLI sessions in one floating shell
+- groups expanded sessions by provider so Claude, Codex, and Gemini work stay visually separated
 - expands for real approvals and user questions
 - supports in-island approval, reply, mini terminal peek, and jump-back actions
 - shows provider usage HUD, replay timeline, idle/sleep states, and Telegram remote approval as optional extras
 - keeps event flow local through a Rust daemon, Unix socket, SQLite state, and a PyQt6/QML shell
+- keeps Claude / Codex / Gemini rendered as provider-grouped sections instead of one mixed wall of sessions
 
 ## First-Class Environment
 
@@ -34,12 +36,12 @@ Other Linux desktops and terminals are still best-effort.
 - Python 3.12 or newer
 - Rust toolchain with `cargo`
 - PyQt6 available in your Python environment
-- Claude Code and/or Codex CLI installed locally
+- Claude Code and/or Codex CLI and/or Gemini CLI installed locally
 - Arch Linux / KDE Plasma / Wayland / Konsole if you want the most tested path
 
 ## Quick Start
 
-1. Install the Claude Code / Codex bridge hooks:
+1. Install the Claude Code / Codex / Gemini bridge hooks:
 
 ```bash
 cd /path/to/vibeisland-linux
@@ -72,7 +74,8 @@ vibeisland stop
 
 - one-command launcher for daemon + shell
 - desktop launcher installation through `install-desktop`
-- Claude Code + Codex hooks bridge
+- Claude Code + Codex + Gemini hooks bridge
+- provider-grouped expanded view for Claude / Codex / Gemini
 - in-island approvals and replies for core flows
 - jump-back and mini terminal peek
 - Telegram remote approval bridge
@@ -82,8 +85,10 @@ vibeisland stop
 
 - Claude Code config lives in `~/.claude/settings.json`
 - Codex config lives in `~/.codex/config.toml` and `~/.codex/hooks.json`
+- Gemini config lives in `~/.gemini/settings.json`
 - Switching Claude between OAuth and API key modes must not remove the `hooks` or `statusLine` sections
 - Codex must keep `approval_policy = "never"`, `notify`, and `features.codex_hooks = true`
+- Gemini must keep the installed `hooks` block in `~/.gemini/settings.json`
 - Telegram is optional and should never be required for the island to run
 
 Detailed setup instructions:
@@ -114,6 +119,8 @@ The local Claude+Codex collaboration runtime remains a separate private/local pr
 ## Known Beta Limitations
 
 - first-class behavior is still tuned for KDE Plasma + Wayland + Konsole
+- Gemini support is intentionally minimal in `beta1`: live state, approvals/questions, jump, Telegram, and peek are the target surface
+- Gemini 5h / 7d quota windows are not exposed by stable local CLI state today, so the island currently shows transcript/session token estimates instead of fake percentages
 - pin / always-on-top remains best-effort under Wayland compositor policy
 - terminal jump precision outside the tested environment is still improving
 - UI polish is already strong enough for daily use, but not final

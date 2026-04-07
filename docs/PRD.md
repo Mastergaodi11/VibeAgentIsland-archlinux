@@ -19,6 +19,7 @@ This project is inspired by the original Vibe Island product and uses its public
 
 - official site: https://vibeisland.app/
 - Claude Island reference repo: https://github.com/farouqaldori/claude-island
+- CodeIsland reference repo: https://github.com/wxtsky/CodeIsland
 
 ## Product Principles
 
@@ -40,6 +41,8 @@ What works now:
 - draggable floating island with persistent position during runtime
 - Claude Code and Codex CLI hook integration
 - in-island approval / ask-user interaction for core Claude/Codex flows
+- provider-grouped expanded view for Claude / Codex / Gemini
+- Gemini CLI minimum viable adapter with live session recovery, approvals/questions, jump, Telegram, and peek support
 - inline third-option follow-up text entry inside the session card
 - optimistic UI response state so approval cards close quickly after click
 - best-effort jump back to existing terminals, with KDE Wayland / Konsole working well
@@ -69,7 +72,7 @@ What is only partial today:
 - UI fidelity compared with the original Mac app, even though the information hierarchy is now much improved
 - always-on-top behavior is still partly compositor-dependent, so pinning needs best-effort engineering plus a graceful fallback story
 - the expanded shell still needs adaptive header compaction so task titles and state pills stay readable across user-resized widths
-- multi-agent coverage beyond Claude/Codex
+- multi-agent coverage beyond Claude/Codex/Gemini
 - title recovery for every live session still needs deeper artifact parsing for nonstandard transcripts and future adapters
 
 What is not shipped yet:
@@ -78,7 +81,7 @@ What is not shipped yet:
 - batch approvals
 - token / runtime / cost HUD
 - settings UI, tray UI, and advanced notification controls
-- Cursor / OpenCode / Droid / Gemini production adapters
+- Cursor / OpenCode / Droid production adapters
 
 ## User Problems
 
@@ -110,6 +113,7 @@ System notifications alone are not enough because they do not preserve session c
 
 - Claude Code
 - Codex CLI
+- Gemini CLI (minimum viable support)
 
 ### Supported states in MVP
 
@@ -137,6 +141,17 @@ System notifications alone are not enough because they do not preserve session c
 - full support for all AI agents on day one
 - perfect precision jump for every Linux terminal emulator
 - cloud sync or remote accounts
+
+### Provider-Grouped UI Direction
+
+The expanded shell should now default to grouped provider sections instead of one long mixed list.
+
+Rules:
+
+- show separate sections for `Claude`, `Codex`, and `Gemini`
+- keep blocked / waiting sessions at the top of each section
+- keep the replay timeline above the grouped sections as one cross-provider history strip
+- keep collapsed mode focused on the single most important live session, or show `sleeping` when everything is idle
 
 ## Differentiating Linux Features
 

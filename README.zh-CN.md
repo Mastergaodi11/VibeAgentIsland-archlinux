@@ -2,7 +2,7 @@
 
 English version: [`README.md`](./README.md)
 
-`Vibe Island for Linux` 是一个本地优先的 Linux “Agent 灵动岛”。它可以持续观察 Claude Code 和 Codex 的实时会话状态，在真正需要你介入审批或回答时把注意力拉回来，并且帮你跳回正确的终端。
+`Vibe Island for Linux` 是一个本地优先的 Linux “Agent 灵动岛”。它可以持续观察 Claude Code、Codex 和 Gemini CLI 的实时会话状态，在真正需要你介入审批或回答时把注意力拉回来，并且帮你跳回正确的终端。
 
 ## 当前发布状态
 
@@ -12,11 +12,13 @@ English version: [`README.md`](./README.md)
 
 ## 它是干什么的
 
-- 在一个浮动壳层里同时监控多个 Claude Code / Codex 会话
+- 在一个浮动壳层里同时监控多个 Claude Code / Codex / Gemini CLI 会话
+- 展开态默认按 provider 分组，让 Claude、Codex、Gemini 三类工作更直观地分开
 - 遇到真正的审批和提问时自动展开
 - 支持岛内审批、回复、mini terminal peek 和 jump 回原终端
 - 提供 usage HUD、replay 时间线、idle/sleep 折叠态，以及可选的 Telegram 远程审批
 - 整体采用本地架构：Rust daemon、Unix socket、SQLite、PyQt6/QML shell
+- 展开态默认按 Claude / Codex / Gemini 分组显示，而不是混成一整面长列表
 
 ## 当前一等支持环境
 
@@ -34,12 +36,12 @@ English version: [`README.md`](./README.md)
 - Python 3.12 或更高版本
 - 带 `cargo` 的 Rust 工具链
 - Python 环境中可用的 PyQt6
-- 本地已安装 Claude Code 和 / 或 Codex CLI
+- 本地已安装 Claude Code、Codex CLI 和 / 或 Gemini CLI
 - 如果你想获得当前最稳的体验，建议环境为 Arch Linux / KDE Plasma / Wayland / Konsole
 
 ## 快速开始
 
-1. 先安装 Claude Code / Codex 的桥接 hooks：
+1. 先安装 Claude Code / Codex / Gemini 的桥接 hooks：
 
 ```bash
 cd /path/to/vibeisland-linux
@@ -72,7 +74,8 @@ vibeisland stop
 
 - 一条命令同时拉起 daemon 和 shell
 - 通过 `install-desktop` 安装桌面入口
-- Claude Code + Codex hooks bridge
+- Claude Code + Codex + Gemini hooks bridge
+- 展开态按 Claude / Codex / Gemini 分组展示
 - 核心审批与回复可在岛内完成
 - Jump 回原终端和 mini terminal peek
 - Telegram 远程审批桥接
@@ -82,8 +85,10 @@ vibeisland stop
 
 - Claude Code 配置文件：`~/.claude/settings.json`
 - Codex 配置文件：`~/.codex/config.toml` 与 `~/.codex/hooks.json`
+- Gemini 配置文件：`~/.gemini/settings.json`
 - Claude 在 OAuth 和 API key 模式之间切换时，不能把 `hooks` 和 `statusLine` 删掉
 - Codex 需要保留 `approval_policy = "never"`、`notify` 与 `features.codex_hooks = true`
+- Gemini 需要保留安装进去的 `hooks` 段
 - Telegram 是可选功能，绝不能成为灵动岛运行的前提
 
 详细配置说明见：
@@ -114,6 +119,8 @@ vibeisland stop
 ## 当前 beta 已知限制
 
 - 当前一等体验仍然主要围绕 KDE Plasma + Wayland + Konsole
+- `beta1` 里的 Gemini 支持是“最小可用”路线：先覆盖 live 状态、审批/提问、jump、Telegram 与 peek
+- Gemini 当前没有稳定的本地 5h / 7d 配额窗口可读来源，所以岛内先诚实显示 transcript / session token 估算，而不是伪造百分比
 - Wayland 下的 pin / always-on-top 仍然是 best-effort
 - 测试环境之外的终端 Jump 精准度还在继续提高
 - UI 质感已经能满足日常使用，但仍不是最终完成态

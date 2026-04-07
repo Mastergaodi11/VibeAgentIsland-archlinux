@@ -4,7 +4,7 @@ Chinese version: `docs/INTEGRATION_SETUP.zh-CN.md`
 
 Maintenance note: keep the English and Chinese editions in sync whenever this document changes.
 
-This document explains the local CLI configuration required for `Vibe Island` to work correctly with `Claude Code` and `Codex` on another Linux machine.
+This document explains the local CLI configuration required for `Vibe Island` to work correctly with `Claude Code`, `Codex`, and `Gemini CLI` on another Linux machine.
 
 ## Goal
 
@@ -13,6 +13,8 @@ To make the island work normally, two integrations must exist:
 - `Claude Code` must forward lifecycle and approval events through `~/.claude/settings.json`
 - `Claude Code` must also expose `rate_limits` through `statusLine` if you want the Claude 5-hour / 7-day quota HUD
 - `Codex` must forward lifecycle events through `~/.codex/config.toml` and `~/.codex/hooks.json`
+- `Gemini CLI` must forward lifecycle/tool/agent events through `~/.gemini/settings.json`
+- `Gemini CLI` does not currently expose a stable local 5-hour / 7-day quota source, so the island only shows transcript/session token totals for Gemini
 
 This project already provides an installer:
 
@@ -191,6 +193,55 @@ Example shape:
 }
 ```
 
+## Gemini CLI
+
+Config file:
+
+- `~/.gemini/settings.json`
+
+### Required Gemini hooks
+
+The following Gemini hook events should call:
+
+```bash
+/usr/bin/python "/path/to/vibeisland-linux/tools/vibeisland.py" gemini-hook
+```
+
+This project currently installs these Gemini events:
+
+- `SessionStart`
+- `SessionEnd`
+- `BeforeTool`
+- `AfterTool`
+- `BeforeAgent`
+- `AfterAgent`
+
+Example shape:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Notes:
+
+- the first public Gemini support is intentionally minimum-viable
+- the target surface is live session visibility, approvals/questions, jump, Telegram, and peek
+- Gemini quota HUD is not part of the current public guarantee
+
 ## Recommended setup flow on a new machine
 
 1. Clone or copy `vibeisland-linux`
@@ -213,7 +264,7 @@ python tools/vibeisland.py install all
 "forceLoginMethod": "claudeai"
 ```
 
-6. Restart both `claude` and `codex`
+6. Restart `claude`, `codex`, and `gemini` if installed
 7. Start Vibe Island with the unified launcher:
 
 ```bash

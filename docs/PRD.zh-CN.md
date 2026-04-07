@@ -19,6 +19,7 @@
 
 - 官方网站：https://vibeisland.app/
 - Claude Island 参考仓库：https://github.com/farouqaldori/claude-island
+- CodeIsland 参考仓库：https://github.com/wxtsky/CodeIsland
 
 ## 产品原则
 
@@ -39,6 +40,8 @@
 - 重开后自动重新扫描正在运行的 Claude / Codex 会话
 - 可拖拽且能记忆位置的浮动灵动岛
 - Claude Code 与 Codex CLI 的 hook 接入
+- 按 provider 分组的展开态列表骨架，方向是 `Claude / Codex / Gemini`
+- Gemini CLI 最小可用适配，目标覆盖 live 会话、审批 / 提问、jump、Telegram 与 peek
 - Claude / Codex 核心审批与提问可在岛内完成
 - 第三个选项支持在卡片内直接输入补充回复
 - 乐观 UI 反馈，点击审批后卡片会尽快收起
@@ -69,7 +72,7 @@
 - 与原版 Mac 产品相比，UI 质感仍有差距
 - 置顶行为仍部分受 compositor 限制，因此 pin 功能还需要“尽量保证 + 友好回退”两手准备
 - 展开态 shell 仍需要更强的自适应头部压缩策略，以保证用户缩放后标题和状态 pill 不会互相重叠
-- Claude / Codex 之外的多 Agent 覆盖
+- Claude / Codex / Gemini 之外的多 Agent 覆盖
 - 对非标准 transcript 和未来适配器的标题恢复还需要更深层解析
 
 尚未交付：
@@ -78,7 +81,7 @@
 - 批量审批
 - 完整 token / runtime / cost HUD
 - 设置界面、托盘界面和高级通知设置
-- Cursor / OpenCode / Droid / Gemini 的正式生产级适配
+- Cursor / OpenCode / Droid 的正式生产级适配
 
 ## 用户问题
 
@@ -110,6 +113,7 @@
 
 - Claude Code
 - Codex CLI
+- Gemini CLI（最小可用支持）
 
 ### MVP 支持的状态
 
@@ -137,6 +141,17 @@
 - 所有 Linux 终端模拟器都做到完美 Jump
 - 所有未来 Agent / 终端组合都能做到完美岛内审批执行
 - 云同步或远程账户体系
+
+### Provider 分组式 UI 方向
+
+展开态现在默认朝 provider 分组推进，而不是单一混排长列表。
+
+规则：
+
+- 分别展示 `Claude`、`Codex`、`Gemini` 三个 section
+- 每个 section 内部先排 `blocked / waiting_user`，再排 `running`
+- `Replay` 时间线继续放在 provider sections 上方，作为跨 provider 的全局历史带
+- 折叠态聚焦最重要的一条 live 会话；如果全部都闲置，则切到 `sleeping` 呈现
 
 ## Linux 版差异化功能
 
