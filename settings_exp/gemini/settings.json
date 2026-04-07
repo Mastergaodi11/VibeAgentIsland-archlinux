@@ -1,0 +1,73 @@
+{
+  "security": {
+    "auth": {}
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 600000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

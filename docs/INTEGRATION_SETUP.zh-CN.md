@@ -15,6 +15,7 @@
 - `Codex` 需要通过 `~/.codex/config.toml` 和 `~/.codex/hooks.json` 把生命周期事件转发出来
 - `Gemini CLI` 需要通过 `~/.gemini/settings.json` 把生命周期 / 工具 / agent 事件转发出来
 - `Gemini CLI` 目前没有稳定的本地 5 小时 / 7 天配额窗口来源，所以灵动岛只能显示 Gemini 的 transcript / session token 总量
+- `Gemini CLI` 还应该通过 `python tools/vibeisland.py install gemini` 安装到 `~/.local/bin/gemini` 的本地 wrapper 启动，不然 Gemini 自己的原生审批模式会和灵动岛的审批托管互相打架
 
 本项目已经提供了一键安装器：
 
@@ -24,6 +25,13 @@ python tools/vibeisland.py install all
 ```
 
 如果你更想手动配置，可以按下面的方式做。
+
+如果你不想从零手写配置，也可以直接参考仓库里的示例配置包：
+
+- `../settings_exp/README.md`
+- `../settings_exp/README.zh-CN.md`
+
+这个示例包会把认证相关字段留空或保留占位，但会预先把灵动岛需要的 hooks 和 `statusLine` 配好。
 
 ## Claude Code
 
@@ -227,7 +235,7 @@ codex_hooks = true
           {
             "type": "command",
             "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
-            "timeout": 5000
+            "timeout": 600000
           }
         ]
       }
@@ -240,7 +248,13 @@ codex_hooks = true
 
 - 当前公开版里的 Gemini 支持是“最小可用”路线
 - 目标覆盖 live 会话可见、审批 / 提问、jump、Telegram 与 peek
+- `BeforeTool` 在等待人工审批选择时必须持续存活，所以它的 timeout 会故意配得比其它 Gemini hook 长很多
+- 安装器还会额外写一个本地 `~/.local/bin/gemini` wrapper；如果你没有显式传入审批参数，它会自动以 `--approval-mode=yolo` 启动 Gemini
+- 如果没有这个 wrapper，灵动岛已经处理完审批后，Gemini 仍可能回退到自己的原生 `Action Required` 界面
+- 如果当前 Gemini 是通过 NVM 安装的，安装器还会顺手接管对应的 NVM `bin/gemini` 入口，这样即使某些终端直接命中 NVM 路径，也会继续走灵动岛的 wrapper 行为
+- 请确保 `PATH` 里 `~/.local/bin` 的优先级高于 NVM 或系统自带的 Gemini 二进制；如果某个终端表现得还像旧版本，请把那个终端彻底关掉再重新开
 - Gemini 的额度 HUD 目前不在公开版承诺范围里
+- 当前 Gemini CLI 的本地状态里还没有找到稳定的 `5H / 7D` 配额窗口来源，所以灵动岛会诚实显示 `Unavailable`，而不是伪造百分比
 
 ## 在新机器上的推荐配置流程
 
@@ -258,6 +272,20 @@ python tools/vibeisland.py install all
 - `ANTHROPIC_AUTH_TOKEN`
 - `ANTHROPIC_BASE_URL`
 
+## 可移植性说明
+
+当前一等支持环境仍然是：
+
+- Arch Linux / EndeavourOS
+- KDE Plasma
+- Wayland
+- Konsole
+
+同时，当前代码结构也正在清理成更利于后续移植的形态，后续目标包括：
+
+- Ubuntu 24.04
+- Windows 11
+
 5. 增加或保留：
 
 ```json
@@ -270,6 +298,80 @@ python tools/vibeisland.py install all
 ```bash
 cd /path/to/vibeisland-linux
 python tools/vibeisland.py launch
+```
+
+## 常见安装与配置雷点
+
+- 执行 `python tools/vibeisland.py install all` 之后，请把已经开着的 `claude`、`codex`、`gemini` 终端全部彻底关掉，再开新的终端会话。旧 provider 进程会继续沿用旧 hooks 和旧启动参数。
+- Gemini 的审批链路只有在当前 `gemini` 命令命中了 Vibe Island 安装到 `~/.local/bin/gemini` 的 wrapper，或者命中了已经被接管的 NVM 入口时才会稳定工作。如果审批又退回 Gemini 自己的 `Action Required`，请彻底关掉那个终端，再开一个全新终端，并确认 `PATH` 里 `~/.local/bin` 的优先级最高。
+- 如果某个 shell 还记着旧的 Gemini 二进制路径，执行一次 `hash -r`，或者直接换一个新终端后再测审批。
+- Claude 不管是浏览器 OAuth 还是 API key 模式，都必须继续保留同一套 `hooks` 和 `statusLine`。切换登录方式时不要把这些集成段删掉。
+- Codex 的审批和生命周期同步依赖三件事同时保留：`approval_policy = "never"`、`notify`、`features.codex_hooks = true`。
+- Gemini 目前没有稳定公开的本地 `5H / 7D` 配额窗口来源，所以界面上显示 `Unavailable` 属于预期行为，不是渲染问题。
+- 在 KDE Plasma + Wayland 下，`pin` / 始终置顶仍然只能算 best-effort。如果还是被其它窗口盖住，请使用托盘召回作为官方兜底方式。
+- 如果你已经改过 hooks 或 wrapper 路径，但界面看起来仍然像旧逻辑，顺手把灵动岛 shell 也重启一次：
+
+```bash
+vibeisland stop
+vibeisland
+```
+
+## 详细安装路径：Arch Linux + KDE Plasma + Konsole
+
+这是当前最稳、测试最多的安装路径。
+
+1. 安装系统依赖：
+
+```bash
+sudo pacman -S --needed git python python-pip rustup base-devel qt6-base qt6-declarative qt6-multimedia
+rustup default stable
+python -m pip install --user PyQt6
+```
+
+2. 克隆项目：
+
+```bash
+git clone <你的仓库地址> vibeisland-linux
+cd vibeisland-linux
+```
+
+3. 先完成 provider 登录：
+
+- 使用 Claude Code 的话先运行 `claude`
+- 使用 Codex CLI 的话先运行 `codex`
+- 使用 Gemini CLI 的话先运行 `gemini`
+
+4. 如果你想用示例配置起步，先看：
+
+- `../settings_exp/README.md`
+- `../settings_exp/README.zh-CN.md`
+
+5. 把灵动岛集成安装到本机 provider 配置里：
+
+```bash
+python tools/vibeisland.py install all
+```
+
+6. 把已经开着的 provider CLI 全部关掉后再重开，让新的 hooks 生效。
+
+7. 启动灵动岛：
+
+```bash
+python tools/vibeisland.py launch
+```
+
+8. 可选：安装桌面入口：
+
+```bash
+python tools/vibeisland.py install-desktop
+```
+
+之后日常使用命令就是：
+
+```bash
+vibeisland
+vibeisland status
+vibeisland stop
 ```
 
 Shell 行为说明：

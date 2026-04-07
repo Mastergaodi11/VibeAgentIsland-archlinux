@@ -15,6 +15,7 @@ To make the island work normally, two integrations must exist:
 - `Codex` must forward lifecycle events through `~/.codex/config.toml` and `~/.codex/hooks.json`
 - `Gemini CLI` must forward lifecycle/tool/agent events through `~/.gemini/settings.json`
 - `Gemini CLI` does not currently expose a stable local 5-hour / 7-day quota source, so the island only shows transcript/session token totals for Gemini
+- `Gemini CLI` should also be launched through the local `~/.local/bin/gemini` wrapper installed by `python tools/vibeisland.py install gemini`, because Gemini's native approval mode otherwise competes with the island-managed approval flow
 
 This project already provides an installer:
 
@@ -24,6 +25,13 @@ python tools/vibeisland.py install all
 ```
 
 If you prefer to configure things manually, use the sections below.
+
+If you want copy-ready starter files instead of building the config by hand, use:
+
+- `../settings_exp/README.md`
+- `../settings_exp/README.zh-CN.md`
+
+The example package keeps authentication empty or placeholder-only, while prewiring the hooks and `statusLine` pieces required by the island.
 
 ## Claude Code
 
@@ -227,7 +235,7 @@ Example shape:
           {
             "type": "command",
             "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
-            "timeout": 5000
+            "timeout": 600000
           }
         ]
       }
@@ -240,7 +248,13 @@ Notes:
 
 - the first public Gemini support is intentionally minimum-viable
 - the target surface is live session visibility, approvals/questions, jump, Telegram, and peek
+- `BeforeTool` must stay alive while the island waits for a human approval decision, so its timeout is intentionally much longer than the other Gemini hook events
+- the installer also writes a local `~/.local/bin/gemini` wrapper that launches Gemini with `--approval-mode=yolo` unless you explicitly pass your own approval flags
+- without that wrapper, Gemini can fall back to its own native `Action Required` UI after the island already handled an approval
+- when the active Gemini install comes from NVM, the installer also shims that NVM `bin/gemini` entrypoint so terminals that resolve Gemini there still use the wrapper behavior
+- make sure `~/.local/bin` comes before any NVM or system Gemini binary in `PATH`; if a terminal still behaves like the old binary, close that terminal fully and open a new one
 - Gemini quota HUD is not part of the current public guarantee
+- stable local `5H / 7D` quota windows have not been found in current Gemini CLI local state, so the island keeps Gemini quota output honest and shows `Unavailable` instead of fabricating percentages
 
 ## Recommended setup flow on a new machine
 
@@ -258,6 +272,20 @@ python tools/vibeisland.py install all
 - `ANTHROPIC_AUTH_TOKEN`
 - `ANTHROPIC_BASE_URL`
 
+## Portability Notes
+
+Current first-class behavior is still tuned for:
+
+- Arch Linux / EndeavourOS
+- KDE Plasma
+- Wayland
+- Konsole
+
+The codebase is also being cleaned up so future ports can reuse the same provider adapters and normalized shell model on:
+
+- Ubuntu 24.04
+- Windows 11
+
 5. Add or keep:
 
 ```json
@@ -270,6 +298,80 @@ python tools/vibeisland.py install all
 ```bash
 cd /path/to/vibeisland-linux
 python tools/vibeisland.py launch
+```
+
+## Common Setup Pitfalls
+
+- After `python tools/vibeisland.py install all`, fully close every already-open `claude`, `codex`, and `gemini` terminal, then launch fresh sessions. Old provider processes keep old hooks and old launch arguments.
+- Gemini approvals only work cleanly when the active `gemini` command resolves to the Vibe Island wrapper installed at `~/.local/bin/gemini` or the shimmed NVM entrypoint. If approvals still fall back to Gemini's native `Action Required` UI, close that terminal completely, open a fresh terminal, and confirm `~/.local/bin` comes first in `PATH`.
+- If a shell still remembers the old Gemini binary after install, run `hash -r` or open a new terminal before testing approvals again.
+- Claude browser OAuth and API key mode both require the same `hooks` and `statusLine` blocks. Switching auth mode must never remove those integration sections.
+- Codex approval and lifecycle reporting depend on three pieces staying in place together: `approval_policy = "never"`, `notify`, and `features.codex_hooks = true`.
+- Gemini currently has no stable public local `5H / 7D` quota-window source. `Unavailable` for Gemini quota is expected and documented behavior, not a missing render.
+- On KDE Plasma + Wayland, `pin` / always-on-top remains best-effort. Tray summon is the supported fallback when another window still covers the island.
+- If you update hooks or wrapper paths and something still looks stale, restart the island shell too:
+
+```bash
+vibeisland stop
+vibeisland
+```
+
+## Detailed Install Path: Arch Linux + KDE Plasma + Konsole
+
+This is the most tested path today.
+
+1. Install system dependencies:
+
+```bash
+sudo pacman -S --needed git python python-pip rustup base-devel qt6-base qt6-declarative qt6-multimedia
+rustup default stable
+python -m pip install --user PyQt6
+```
+
+2. Clone the project:
+
+```bash
+git clone <your-repo-url> vibeisland-linux
+cd vibeisland-linux
+```
+
+3. Complete provider login first:
+
+- run `claude` if you use Claude Code
+- run `codex` if you use Codex CLI
+- run `gemini` if you use Gemini CLI
+
+4. If you want guided starter configs, begin with:
+
+- `../settings_exp/README.md`
+- `../settings_exp/README.zh-CN.md`
+
+5. Install the island integration into your local provider configs:
+
+```bash
+python tools/vibeisland.py install all
+```
+
+6. Close any provider CLIs that were already open, then reopen them so the new hooks become active.
+
+7. Start the island:
+
+```bash
+python tools/vibeisland.py launch
+```
+
+8. Optional: install the desktop launcher:
+
+```bash
+python tools/vibeisland.py install-desktop
+```
+
+After that, your normal daily commands are:
+
+```bash
+vibeisland
+vibeisland status
+vibeisland stop
 ```
 
 Shell behavior notes:

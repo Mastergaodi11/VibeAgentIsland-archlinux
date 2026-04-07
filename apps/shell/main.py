@@ -19,7 +19,7 @@ from typing import Any
 
 os.environ.setdefault("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", "")
 
-from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot, QUrl
+from PyQt6.QtCore import QObject, QEvent, QTimer, pyqtProperty, pyqtSignal, pyqtSlot, QUrl
 from PyQt6.QtGui import QAction, QGuiApplication, QIcon, QPainter, QPixmap, QColor
 from PyQt6.QtQml import QQmlApplicationEngine
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -171,7 +171,7 @@ PROVIDER_SECTION_LABELS = {
 PROVIDER_SECTION_ACCENTS = {
     "claude": "#ca856f",
     "codex": "#7ea8bf",
-    "gemini": "#8d83d2",
+    "gemini": "#a79aff",
     "collab": "#6fb390",
     "other": "#8d97a2",
 }
@@ -181,6 +181,10 @@ _LIVE_PROCESS_CACHE: dict[str, Any] = {"expires_at": 0.0, "sessions": []}
 USAGE_REFRESH_INTERVAL_SECONDS = 4.0
 TELEGRAM_POLL_INTERVAL_SECONDS = 2.2
 TELEGRAM_NOTIFICATION_COOLDOWN_SECONDS = 30.0
+AUTO_COLLAPSE_DEFAULT_ENABLED = True
+AUTO_COLLAPSE_DEFAULT_SECONDS = 75
+AUTO_COLLAPSE_MIN_SECONDS = 15
+AUTO_COLLAPSE_MAX_SECONDS = 900
 PREVIEW_NOISE_HINTS = (
     "<local-command-caveat>",
     "codex-companion.mjs",
@@ -375,6 +379,15 @@ def normalize_text(value: Any) -> str:
     return text
 
 
+def safe_slug(value: Any) -> str:
+    text = normalize_text(value)
+    if not text:
+        return "value"
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", text)
+    slug = re.sub(r"-{2,}", "-", slug).strip("-.")
+    return slug or "value"
+
+
 def truncate(value: Any, limit: int = 88) -> str:
     text = normalize_text(value)
     if len(text) <= limit:
@@ -524,6 +537,184 @@ def recent_meaningful_lines(lines: list[str] | None, limit: int = 6) -> list[str
     return ordered
 
 
+def provider_display_name(source: str | None) -> str:
+    return provider_label_for_key(provider_key_for_source(source))
+
+
+def sanitize_dialogue_text(text: str | None, *, limit: int = 116) -> str:
+    content = normalize_text(text)
+    if not content:
+        return ""
+    content = content.replace("```text", " ").replace("```", " ")
+    content = re.sub(r"\s+", " ", content).strip()
+    return truncate(content, limit)
+
+
+def dialogue_line_entry(role: str, text: str, source: str, kind: str) -> dict[str, str]:
+    return {
+        "role": role,
+        "text": sanitize_dialogue_text(text),
+        "provider": provider_key_for_source(source),
+        "kind": kind,
+    }
+
+
+def classify_dialogue_line(text: str | None, source: str) -> dict[str, str] | None:
+    content = sanitize_dialogue_text(text)
+    if not content or is_preview_noise(content):
+        return None
+
+    lowered = content.lower()
+    provider_name = provider_display_name(source)
+    if lowered.startswith("you:"):
+        body = sanitize_dialogue_text(content.split(":", 1)[1])
+        if not body:
+            return None
+        return dialogue_line_entry("You", body, source, "user")
+    if lowered.startswith("system:"):
+        body = sanitize_dialogue_text(content.split(":", 1)[1])
+        if not body:
+            return None
+        return dialogue_line_entry("System", body, source, "system")
+    if content.startswith("$ "):
+        return dialogue_line_entry("System", content, source, "system")
+    if lowered in {"bash", "completed", "updated", "failed", "session started", "resumed"}:
+        return dialogue_line_entry("System", content, source, "system")
+    if (
+        lowered.startswith("tool ")
+        or lowered.startswith("approval ")
+        or lowered.startswith("approval:")
+        or lowered.startswith("executed in ")
+        or lowered.startswith("http/")
+        or lowered.startswith("warning:")
+        or lowered.startswith("error:")
+        or lowered.startswith("bash(")
+        or lowered.startswith("bash ")
+        or lowered.startswith("completed:")
+        or lowered.startswith("failed:")
+        or lowered.startswith("session started")
+        or lowered.startswith("running ")
+    ):
+        return dialogue_line_entry("System", content, source, "system")
+    return dialogue_line_entry(provider_name, content, source, "agent")
+
+
+def build_recent_dialogue_lines(
+    *,
+    source: str,
+    preview_lines: list[str] | None,
+    prompt: str | None = None,
+    summary: str | None = None,
+    question: str | None = None,
+) -> list[dict[str, str]]:
+    provider_name = provider_display_name(source)
+    parsed: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def append_candidate(entry: dict[str, str] | None) -> None:
+        if not isinstance(entry, dict):
+            return
+        text_value = sanitize_dialogue_text(entry.get("text"))
+        if not text_value:
+            return
+        key = (normalize_text(entry.get("kind")).lower(), text_value)
+        if key in seen:
+            return
+        seen.add(key)
+        parsed.append(
+            {
+                "role": normalize_text(entry.get("role")) or provider_name,
+                "text": text_value,
+                "provider": normalize_text(entry.get("provider")) or provider_key_for_source(source),
+                "kind": normalize_text(entry.get("kind")) or "agent",
+            }
+        )
+
+    prompt_text = sanitize_dialogue_text(prompt)
+    if prompt_text:
+        append_candidate(dialogue_line_entry("You", prompt_text, source, "user"))
+
+    for item in preview_lines or []:
+        append_candidate(classify_dialogue_line(item, source))
+
+    summary_text = sanitize_dialogue_text(summary)
+    if summary_text and not is_preview_noise(summary_text):
+        lowered = summary_text.lower()
+        if not lowered.startswith("detected live ") and summary_text != prompt_text:
+            append_candidate(classify_dialogue_line(summary_text, source))
+
+    question_text = sanitize_dialogue_text(question)
+    if question_text:
+        append_candidate(dialogue_line_entry(provider_name, question_text, source, "agent"))
+
+    conversation_lines = [item for item in parsed if normalize_text(item.get("kind")).lower() != "system"]
+    selected = conversation_lines[-3:] if len(conversation_lines) >= 2 else parsed[-3:]
+    if selected:
+        return selected
+
+    fallback_text = sanitize_dialogue_text(question or summary or prompt)
+    if fallback_text:
+        return [dialogue_line_entry("System", fallback_text, source, "system")]
+    return []
+
+
+def find_rate_limit_payloads(payload: Any, *, limit: int = 12) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+
+    def walk(node: Any, depth: int = 0) -> None:
+        if len(matches) >= limit or depth > 8:
+            return
+        if isinstance(node, dict):
+            if rate_limit_window(node, "5h") or rate_limit_window(node, "7d"):
+                matches.append(node)
+            for value in node.values():
+                walk(value, depth + 1)
+        elif isinstance(node, list):
+            for value in node[:20]:
+                walk(value, depth + 1)
+
+    walk(payload)
+    return matches
+
+
+def gemini_local_quota_snapshot() -> dict[str, Any]:
+    candidate_payloads: list[dict[str, Any]] = []
+
+    for path in (GEMINI_STATE_PATH, GEMINI_PROJECTS_PATH):
+        payload = read_json_file_maybe(path)
+        if payload:
+            candidate_payloads.extend(find_rate_limit_payloads(payload))
+
+    if GEMINI_TMP_DIR.exists():
+        recent_chat_files = sorted(
+            GEMINI_TMP_DIR.glob("*/chats/*.json"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )[:8]
+        for path in recent_chat_files:
+            payload = read_json_file_maybe(path)
+            if payload:
+                candidate_payloads.extend(find_rate_limit_payloads(payload))
+
+    for rate_limits in candidate_payloads:
+        five_hour = remaining_percent_from_window(rate_limit_window(rate_limits, "5h"))
+        seven_day = remaining_percent_from_window(rate_limit_window(rate_limits, "7d"))
+        if five_hour is not None or seven_day is not None:
+            return {
+                "fiveHour": f"{five_hour}% left" if five_hour is not None else "unavailable",
+                "sevenDay": f"{seven_day}% left" if seven_day is not None else "unavailable",
+                "detail": "Gemini local quota window",
+                "mode": "quota",
+            }
+
+    return {
+        "fiveHour": "unavailable",
+        "sevenDay": "unavailable",
+        "detail": "Gemini local quota window unavailable",
+        "mode": "estimate",
+    }
+
+
 def read_proc_fd_targets(pid: int | None) -> list[str]:
     if not pid:
         return []
@@ -594,6 +785,23 @@ def read_proc_ppid(pid: int | None) -> int | None:
             except Exception:
                 return None
     return None
+
+
+def pid_is_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    status_path = Path("/proc") / str(int(pid)) / "status"
+    if not status_path.exists():
+        return False
+    try:
+        for line in status_path.read_text(errors="ignore").splitlines():
+            if not line.startswith("State:"):
+                continue
+            state_code = line.split(":", 1)[1].strip()[:1].upper()
+            return state_code not in {"X", "Z"}
+    except Exception:
+        return True
+    return True
 
 
 def process_ancestors(pid: int | None, max_depth: int = 8) -> list[dict[str, Any]]:
@@ -1938,6 +2146,9 @@ def display_session_aliases(session: dict[str, Any]) -> set[str]:
     aliases: set[str] = set()
     session_id = normalize_text(session.get("id"))
     artifact_session = normalize_text(session.get("artifactSessionId"))
+    managed_session = normalize_text(session.get("managedApprovalSessionId"))
+    managed_ui_session = normalize_text(session.get("managedApprovalUiSessionId"))
+    managed_request = normalize_text(session.get("managedApprovalRequestKey"))
     tty_name = normalize_tty_key(session.get("jumpTty"))
     jump_pid = normalize_text(session.get("jumpPid"))
     live_pid = normalize_text(extract_live_process_pid(session.get("id")))
@@ -1948,6 +2159,12 @@ def display_session_aliases(session: dict[str, Any]) -> set[str]:
         aliases.add(f"{source}|id|{session_id}")
     if artifact_session:
         aliases.add(f"{source}|artifact|{artifact_session}")
+    if managed_session:
+        aliases.add(f"{source}|managed-session|{managed_session}")
+    if managed_ui_session:
+        aliases.add(f"{source}|managed-ui|{managed_ui_session}")
+    if managed_request:
+        aliases.add(f"{source}|managed-request|{managed_request}")
     if tty_name:
         aliases.add(f"{source}|tty|{tty_name}")
     if jump_pid:
@@ -2029,6 +2246,45 @@ def dedupe_display_sessions(sessions: list[dict[str, Any]]) -> list[dict[str, An
             groups.pop(merge_index)
 
     return [group["session"] for group in groups]
+
+
+def dedupe_local_live_sessions(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    ordered: list[dict[str, Any]] = []
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        source = normalize_text(session.get("source")).lower()
+        jump_target = session.get("jump_target") if isinstance(session.get("jump_target"), dict) else {}
+        tty_name = normalize_tty_key(jump_target.get("tty"))
+        identity = session.get("identity") if isinstance(session.get("identity"), dict) else {}
+        artifact_session = normalize_text(
+            first_text(
+                identity.get("source_session_id"),
+                identity.get("backend_session_id"),
+                (session.get("peek") or {}).get("source_session_id") if isinstance(session.get("peek"), dict) else "",
+            )
+        )
+        workspace = normalize_text(session.get("cwd") or session.get("workspace"))
+        key = (
+            source,
+            tty_name or workspace,
+            artifact_session or workspace,
+        )
+        existing = groups.get(key)
+        if existing is None:
+            groups[key] = session
+            ordered.append(session)
+            continue
+        existing_pid = session_runtime_pid(existing) or 0
+        current_pid = session_runtime_pid(session) or 0
+        existing_updated = parse_iso_timestamp(normalize_text(existing.get("updated_at"))) or 0.0
+        current_updated = parse_iso_timestamp(normalize_text(session.get("updated_at"))) or 0.0
+        if (current_pid, current_updated) >= (existing_pid, existing_updated):
+            groups[key] = session
+            index = ordered.index(existing)
+            ordered[index] = session
+    return ordered
 
 
 def derive_review_fields(
@@ -2146,6 +2402,7 @@ def usage_display_snapshot(
     claude_five_hour_remaining = remaining_percent_from_window(rate_limit_window(claude_rate_limits, "5h"))
     claude_seven_day_remaining = remaining_percent_from_window(rate_limit_window(claude_rate_limits, "7d"))
     claude_mode = "quota" if claude_five_hour_remaining is not None or claude_seven_day_remaining is not None else "estimate"
+    gemini_quota = gemini_local_quota_snapshot()
 
     return {
         "codex": {
@@ -2166,11 +2423,11 @@ def usage_display_snapshot(
         },
         "gemini": {
             "label": "Gemini",
-            "mode": "estimate",
-            "fiveHour": "unavailable",
-            "sevenDay": "unavailable",
+            "mode": gemini_quota.get("mode") or "estimate",
+            "fiveHour": gemini_quota.get("fiveHour") or "unavailable",
+            "sevenDay": gemini_quota.get("sevenDay") or "unavailable",
             "sessionTokens": gemini_delta,
-            "detail": f"Transcript tokens {gemini_tokens_total:,}" if gemini_tokens_total else "Quota unavailable from local Gemini state",
+            "detail": f"Transcript tokens {gemini_tokens_total:,}" if gemini_tokens_total else (gemini_quota.get("detail") or "Quota unavailable from local Gemini state"),
         },
     }
 
@@ -2375,6 +2632,106 @@ def build_grouped_session_entries(
     return entries
 
 
+def session_runtime_pid(session: dict[str, Any]) -> int | None:
+    pid_value = extract_live_process_pid(str(session.get("id") or ""))
+    if pid_value is not None:
+        return pid_value
+    jump_target = session.get("jump_target") if isinstance(session.get("jump_target"), dict) else {}
+    value = jump_target.get("pid")
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def should_display_live_session(session: dict[str, Any]) -> bool:
+    if not isinstance(session, dict):
+        return False
+    if bool(session.get("isCollabSession")):
+        return True
+    source = normalize_text(session.get("source")).lower()
+    if source not in {"claude", "codex", "gemini"}:
+        return True
+    pid = session_runtime_pid(session)
+    if pid is not None and pid_is_alive(pid):
+        return True
+    state = normalize_text(session.get("state")).lower()
+    if state in {"completed", "failed", "idle"} and not bool(session.get("needsResponse")):
+        return False
+    return False
+
+
+def session_matches_local_live(session: dict[str, Any], local_live_sessions: list[dict[str, Any]]) -> bool:
+    if not isinstance(session, dict):
+        return False
+    source = normalize_text(session.get("source")).lower()
+    if source not in {"claude", "codex", "gemini"}:
+        return True
+    session_id = normalize_text(session.get("id"))
+    jump_target = session.get("jump_target") if isinstance(session.get("jump_target"), dict) else {}
+    session_tty = normalize_tty_key(jump_target.get("tty"))
+    session_pid = normalize_text(jump_target.get("pid"))
+    identity = session.get("identity") if isinstance(session.get("identity"), dict) else {}
+    session_artifact = normalize_text(first_text(identity.get("source_session_id"), identity.get("backend_session_id")))
+    session_workspace = normalize_text(session.get("cwd") or session.get("workspace"))
+    for live in local_live_sessions:
+        if not isinstance(live, dict):
+            continue
+        if normalize_text(live.get("source")).lower() != source:
+            continue
+        live_id = normalize_text(live.get("id"))
+        live_jump = live.get("jump_target") if isinstance(live.get("jump_target"), dict) else {}
+        live_tty = normalize_tty_key(live_jump.get("tty"))
+        live_pid = normalize_text(live_jump.get("pid"))
+        live_identity = live.get("identity") if isinstance(live.get("identity"), dict) else {}
+        live_artifact = normalize_text(first_text(live_identity.get("source_session_id"), live_identity.get("backend_session_id")))
+        live_workspace = normalize_text(live.get("cwd") or live.get("workspace"))
+        if session_id and live_id and session_id == live_id:
+            return True
+        if session_artifact and live_artifact and session_artifact == live_artifact:
+            return True
+        if session_tty and live_tty and session_tty == live_tty:
+            return True
+        if session_pid and live_pid and session_pid == live_pid:
+            return True
+        if session_workspace and live_workspace and session_workspace == live_workspace and source == "gemini":
+            return True
+    return False
+
+
+def should_keep_provider_session(
+    session: dict[str, Any],
+    *,
+    local_live_sessions: list[dict[str, Any]],
+    approval_sessions: list[dict[str, Any]],
+) -> bool:
+    if not isinstance(session, dict):
+        return False
+    source = normalize_text(session.get("source")).lower()
+    if source not in {"claude", "codex", "gemini"}:
+        return True
+    if normalize_text(session.get("id")).startswith("live::"):
+        return True
+    if bool(session.get("managedApprovalRequestKey")) or bool(session.get("managedApprovalSessionId")):
+        return True
+    if session_matches_local_live(session, local_live_sessions):
+        return True
+    for approval in approval_sessions:
+        if session_matches_local_live(approval, [session]):
+            return True
+        if session_matches_local_live(session, [approval]):
+            return True
+    state = normalize_text(session.get("state")).lower()
+    if state in {"blocked", "waiting_user"}:
+        return True
+    updated_at = parse_iso_timestamp(normalize_text(session.get("updated_at")))
+    if updated_at is None:
+        return False
+    # Provider sessions that no longer match any live process should fall out of the main
+    # grouped list quickly, while very fresh updates still get a brief grace period.
+    return (time.time() - updated_at) <= 12.0
+
+
 class Backend(QObject):
     snapshotReady = pyqtSignal(object)
     usageSnapshotReady = pyqtSignal(object)
@@ -2392,6 +2749,7 @@ class Backend(QObject):
     focusModeChanged = pyqtSignal()
     pinnedChanged = pyqtSignal()
     promptAttentionChanged = pyqtSignal()
+    autoCollapseChanged = pyqtSignal()
     connectedChanged = pyqtSignal()
     geometryChanged = pyqtSignal()
     usageChanged = pyqtSignal()
@@ -2421,6 +2779,9 @@ class Backend(QObject):
         self._focus_mode = False
         self._pinned = False
         self._prompt_attention_enabled = True
+        self._auto_collapse_enabled = AUTO_COLLAPSE_DEFAULT_ENABLED
+        self._auto_collapse_seconds = AUTO_COLLAPSE_DEFAULT_SECONDS
+        self._last_user_interaction_at = time.monotonic()
         self._connected = False
         self._window_x = -1
         self._window_y = 18
@@ -2451,6 +2812,10 @@ class Backend(QObject):
         self.snapshotReady.connect(self._apply_snapshot)
         self.usageSnapshotReady.connect(self._apply_usage_snapshot)
         self.responseFinished.connect(self._handle_response_finished_feedback)
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setInterval(1000)
+        self._idle_timer.timeout.connect(self._handle_idle_tick)
+        self._idle_timer.start()
         self._stop_event = threading.Event()
         self._worker = threading.Thread(target=self._poll_loop, daemon=True)
         self._worker.start()
@@ -2525,6 +2890,14 @@ class Backend(QObject):
     def promptAttentionEnabled(self):
         return self._prompt_attention_enabled
 
+    @pyqtProperty(bool, notify=autoCollapseChanged)
+    def autoCollapseEnabled(self):
+        return self._auto_collapse_enabled
+
+    @pyqtProperty(int, notify=autoCollapseChanged)
+    def autoCollapseSeconds(self):
+        return self._auto_collapse_seconds
+
     @pyqtProperty("QVariantMap", notify=usageChanged)
     def usage(self):
         return self._usage
@@ -2578,7 +2951,12 @@ class Backend(QObject):
         return dict(self._grouped_section_collapsed)
 
     @pyqtSlot()
+    def noteUserInteraction(self):
+        self._last_user_interaction_at = time.monotonic()
+
+    @pyqtSlot()
     def toggleExpanded(self):
+        self.noteUserInteraction()
         self._expanded = not self._expanded
         self._auto_expand_allowed = self._expanded
         current_prompt_key = self._prompt_key_for_session(self._prompt_session)
@@ -2592,6 +2970,7 @@ class Backend(QObject):
 
     @pyqtSlot()
     def toggleReplayExpanded(self):
+        self.noteUserInteraction()
         self._replay_expanded = not self._replay_expanded
         self.replayExpandedChanged.emit()
         self._write_view_prefs()
@@ -2599,6 +2978,7 @@ class Backend(QObject):
 
     @pyqtSlot()
     def toggleQuietMode(self):
+        self.noteUserInteraction()
         self._quiet_mode = not self._quiet_mode
         self.quietModeChanged.emit()
         self._write_view_prefs()
@@ -2607,6 +2987,7 @@ class Backend(QObject):
 
     @pyqtSlot()
     def togglePinned(self):
+        self.noteUserInteraction()
         self._pinned = not self._pinned
         self.pinnedChanged.emit()
         self._write_view_prefs()
@@ -2614,13 +2995,29 @@ class Backend(QObject):
 
     @pyqtSlot()
     def togglePromptAttention(self):
+        self.noteUserInteraction()
         self._prompt_attention_enabled = not self._prompt_attention_enabled
         self.promptAttentionChanged.emit()
         self._write_view_prefs()
         self._play_sound("toggle")
 
+    @pyqtSlot(bool, int)
+    def saveAutoCollapseSettings(self, enabled: bool, seconds: int):
+        normalized_seconds = self._normalize_auto_collapse_seconds(seconds)
+        changed = (
+            bool(enabled) != self._auto_collapse_enabled
+            or normalized_seconds != self._auto_collapse_seconds
+        )
+        self._auto_collapse_enabled = bool(enabled)
+        self._auto_collapse_seconds = normalized_seconds
+        self.noteUserInteraction()
+        if changed:
+            self.autoCollapseChanged.emit()
+            self._write_view_prefs()
+
     @pyqtSlot(str)
     def toggleProviderSection(self, provider_key: str):
+        self.noteUserInteraction()
         normalized = normalize_text(provider_key).lower()
         if not normalized:
             return
@@ -2632,16 +3029,19 @@ class Backend(QObject):
 
     @pyqtSlot()
     def summonWindow(self):
+        self.noteUserInteraction()
         self.summonRequested.emit()
 
     @pyqtSlot()
     def toggleFocusMode(self):
+        self.noteUserInteraction()
         self._focus_mode = not self._focus_mode
         self.focusModeChanged.emit()
         self._write_view_prefs()
 
     @pyqtSlot(str)
     def refreshPeekPreview(self, session_id: str):
+        self.noteUserInteraction()
         session = self._find_raw_session(session_id)
         if not session:
             self.peekPreviewReady.emit(str(session_id or ""), [])
@@ -2650,6 +3050,7 @@ class Backend(QObject):
 
     @pyqtSlot(str, bool, str)
     def saveTelegramSettings(self, bot_token: str, enabled: bool, chat_id: str):
+        self.noteUserInteraction()
         normalized_token = str(bot_token or "").strip()
         normalized_chat = str(chat_id or "").strip()
         changed = (
@@ -2673,6 +3074,7 @@ class Backend(QObject):
 
     @pyqtSlot()
     def sendTelegramTest(self):
+        self.noteUserInteraction()
         if not self._telegram_bot_token:
             self._telegram_status = "Paste a BotFather token first"
             self.telegramChanged.emit()
@@ -2690,6 +3092,7 @@ class Backend(QObject):
 
     @pyqtSlot(str)
     def jumpToSession(self, session_id: str):
+        self.noteUserInteraction()
         for session in self._raw_sessions:
             if session["id"] != session_id:
                 continue
@@ -2784,7 +3187,8 @@ class Backend(QObject):
 
     @pyqtSlot(str, int, str)
     def respondToSession(self, session_id: str, choice_index: int, choice_text: str):
-        session = self._find_raw_session(session_id)
+        self.noteUserInteraction()
+        session = self._resolve_session_for_action(session_id)
         if not session:
             return
         self._dispatch_response(session, choice_index=choice_index, choice_text=choice_text)
@@ -2792,12 +3196,13 @@ class Backend(QObject):
 
     @pyqtSlot(str, int, str)
     def respondToSessionWithFollowup(self, session_id: str, choice_index: int, followup_text: str):
+        self.noteUserInteraction()
         followup = str(followup_text or "").strip()
         if not followup:
             print(f"Follow-up text missing for {session_id}", file=sys.stderr)
             return
 
-        session = self._find_raw_session(session_id)
+        session = self._resolve_session_for_action(session_id)
         if not session:
             return
         self._dispatch_response(session, choice_index=choice_index, followup_text=followup)
@@ -2805,6 +3210,7 @@ class Backend(QObject):
 
     @pyqtSlot(str, str)
     def sendPeekMessage(self, session_id: str, message_text: str):
+        self.noteUserInteraction()
         text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", str(message_text or ""))
         text = re.sub(r"\r?\n+", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
@@ -2812,7 +3218,7 @@ class Backend(QObject):
             print(f"Peek message missing for {session_id}", file=sys.stderr)
             return
 
-        session = self._find_raw_session(session_id)
+        session = self._resolve_session_for_action(session_id)
         if not session:
             return
         self._dispatch_peek_message(session, text)
@@ -2836,6 +3242,7 @@ class Backend(QObject):
 
     @pyqtSlot(int, int, int, int, bool)
     def saveWindowState(self, x: int, y: int, width: int, height: int, expanded: bool):
+        self.noteUserInteraction()
         self._window_x = max(int(x), -1)
         self._window_y = max(int(y), 0)
         if expanded:
@@ -2874,6 +3281,39 @@ class Backend(QObject):
                 return session
         return None
 
+    def _find_display_session(self, session_id: str) -> dict[str, Any] | None:
+        normalized = normalize_text(session_id)
+        if not normalized:
+            return None
+        for session in self._sessions:
+            if normalize_text(session.get("id")) == normalized:
+                return session
+        return None
+
+    def _resolve_session_for_action(self, session_id: str) -> dict[str, Any] | None:
+        display = self._find_display_session(session_id)
+        if isinstance(display, dict):
+            request = self._approval_request_for_session(display)
+            if request:
+                resolved = self._session_with_pending_approval(request)
+                if isinstance(resolved, dict):
+                    return resolved
+            raw = self._find_raw_session(session_id)
+            if raw:
+                return raw
+            return display
+
+        raw = self._find_raw_session(session_id)
+        if raw:
+            request = self._approval_request_for_session(raw)
+            if request:
+                resolved = self._session_with_pending_approval(request)
+                if isinstance(resolved, dict):
+                    return resolved
+            return raw
+
+        return None
+
     def _approval_request_files(self) -> list[Path]:
         if not APPROVAL_REQUESTS_DIR.exists():
             return []
@@ -2886,12 +3326,29 @@ class Backend(QObject):
             if not request or normalize_text(request.get("source")) == "":
                 continue
             decision = request.get("decision") if isinstance(request.get("decision"), dict) else {}
+            jump_target = request.get("jump_target") if isinstance(request.get("jump_target"), dict) else {}
+            pid_value = jump_target.get("pid")
+            try:
+                request_pid = int(pid_value) if pid_value is not None else None
+            except Exception:
+                request_pid = None
             if normalize_text(decision.get("action")):
+                if request_pid is not None and not pid_is_alive(request_pid):
+                    try:
+                        request_path.unlink()
+                    except Exception:
+                        pass
                 continue
             try:
                 age_seconds = max(0.0, time.time() - request_path.stat().st_mtime)
             except Exception:
                 age_seconds = 0.0
+            if request_pid is not None and not pid_is_alive(request_pid):
+                try:
+                    request_path.unlink()
+                except Exception:
+                    pass
+                continue
             if age_seconds > APPROVAL_REQUEST_STALE_SECONDS:
                 try:
                     request_path.unlink()
@@ -2966,12 +3423,30 @@ class Backend(QObject):
     def _approval_request_for_session(self, session: dict[str, Any]) -> dict[str, Any] | None:
         if not isinstance(session, dict):
             return None
+        explicit_request_key = normalize_text(session.get("managedApprovalRequestKey"))
+        if explicit_request_key:
+            explicit_path = APPROVAL_REQUESTS_DIR / f"{safe_slug(explicit_request_key)}.json"
+            explicit_request = self._read_json_file_maybe(explicit_path)
+            if explicit_request:
+                return explicit_request
+        explicit_session_ids = {
+            normalize_text(session.get("managedApprovalSessionId")),
+            normalize_text(session.get("managedApprovalUiSessionId")),
+        }
+        explicit_session_ids.discard("")
         raw = self._find_raw_session(normalize_text(session.get("id")))
         candidates: list[dict[str, Any]] = []
         if raw:
             candidates.append(raw)
         candidates.append(session)
         for request in self._pending_approval_requests():
+            request_ids = {
+                normalize_text(request.get("session_id")),
+                normalize_text(request.get("ui_session_id")),
+            }
+            request_ids.discard("")
+            if explicit_session_ids and explicit_session_ids & request_ids:
+                return request
             for candidate in candidates:
                 if self._session_matches_approval_request(candidate, request):
                     return request
@@ -3073,6 +3548,9 @@ class Backend(QObject):
         session["created_at"] = normalize_text(request.get("created_at")) or normalize_text(session.get("created_at"))
         session["cwd"] = normalize_text(request.get("cwd")) or normalize_text(session.get("cwd")) or normalize_text(session.get("workspace"))
         session["workspace"] = normalize_text(session.get("workspace")) or normalize_text(session.get("cwd")) or normalize_text(request.get("cwd"))
+        session["managedApprovalRequestKey"] = normalize_text(request.get("request_key"))
+        session["managedApprovalSessionId"] = normalize_text(request.get("session_id"))
+        session["managedApprovalUiSessionId"] = normalize_text(request.get("ui_session_id"))
         request_jump = request.get("jump_target") if isinstance(request.get("jump_target"), dict) else {}
         base_jump = session.get("jump_target") if isinstance(session.get("jump_target"), dict) else {}
         if request_jump:
@@ -3291,7 +3769,7 @@ class Backend(QObject):
     def _apply_snapshot(self, snapshot):
         collab_sessions = collaboration_raw_sessions()
         snapshot_sessions = snapshot.get("sessions", [])
-        local_live_sessions = discover_local_live_sessions(snapshot_sessions)
+        local_live_sessions = dedupe_local_live_sessions(discover_local_live_sessions(snapshot_sessions))
         pending_approval_requests = self._pending_approval_requests()
         approval_sessions = [
             session
@@ -3301,20 +3779,25 @@ class Backend(QObject):
             )
             if isinstance(session, dict)
         ]
-        sessions = snapshot_sessions + local_live_sessions + collab_sessions + approval_sessions
+        sessions = []
+        for session in (snapshot_sessions + local_live_sessions + collab_sessions + approval_sessions):
+            if not should_display_live_session(session):
+                continue
+            if not should_keep_provider_session(
+                session,
+                local_live_sessions=local_live_sessions,
+                approval_sessions=approval_sessions,
+            ):
+                continue
+            sessions.append(session)
         enriched_snapshot = dict(snapshot)
         enriched_snapshot["sessions"] = sessions
         enriched_snapshot["pending_approval_requests"] = pending_approval_requests
-        enriched_snapshot["active_count"] = int(snapshot.get("active_count", len(snapshot_sessions))) + len(
-            [session for session in local_live_sessions if normalize_text(session.get("state")).lower() != "completed"]
-        ) + len(
-            [session for session in collab_sessions if normalize_text(session.get("state")).lower() != "completed"]
+        enriched_snapshot["active_count"] = len(
+            [session for session in sessions if normalize_text(session.get("state")).lower() != "completed"]
         )
-        enriched_snapshot["blocked_count"] = int(snapshot.get("blocked_count", 0)) + len(
-            [session for session in collab_sessions if normalize_text(session.get("state")).lower() in {"waiting_user", "blocked"}]
-        ) + len(approval_sessions)
-        enriched_snapshot["active_count"] += len(
-            [session for session in approval_sessions if normalize_text(session.get("state")).lower() != "completed"]
+        enriched_snapshot["blocked_count"] = len(
+            [session for session in sessions if normalize_text(session.get("state")).lower() in {"waiting_user", "blocked"}]
         )
         previous_raw_sessions = self._raw_sessions
         self._raw_sessions = sessions
@@ -3383,6 +3866,7 @@ class Backend(QObject):
                     "reviewScope": workspace_name(collaboration.get("workspace")),
                     "reviewRisk": normalize_text(collaboration.get("strategy")).replace("_", " "),
                     "peekLines": [str(line) for line in (session.get("peek") or {}).get("preview_lines") or [] if normalize_text(line)],
+                    "recentDialogueLines": [],
                     "artifactSessionId": normalize_text(collaboration.get("session_name")),
                     "needsResponse": state_text in {"Blocked", "Waiting User"},
                     "isCollabSession": True,
@@ -3430,7 +3914,12 @@ class Backend(QObject):
             approval_type = str(interaction.get("approval_type") or "").strip()
             updated_at = str(session.get("updated_at") or snapshot.get("generated_at") or "")
             seconds_since_update = age_seconds(updated_at)
+            raw_state = normalize_text(session.get("state")).lower()
+            runtime_pid = session_runtime_pid(session)
+            live_runtime = runtime_pid is not None and pid_is_alive(runtime_pid)
             state_text = str(session["state"]).replace("_", " ").title()
+            if live_runtime and raw_state in {"completed", "idle"} and not bool(interaction.get("choices")):
+                state_text = "Idle"
             stuck_payload = session.get("stuck") if isinstance(session.get("stuck"), dict) else {}
             stuck = bool(stuck_payload.get("is_stuck", False))
             stale = False
@@ -3451,6 +3940,10 @@ class Backend(QObject):
                 health_kind = "done"
                 health_label = "Completed"
                 health_detail = "Ready to jump back"
+            elif state_text == "Idle":
+                health_kind = "idle"
+                health_label = "Idle"
+                health_detail = "Waiting for your next prompt"
             elif state_text == "Stale":
                 health_kind = "stale"
                 health_label = "Stale"
@@ -3580,11 +4073,21 @@ class Backend(QObject):
                     review_reason=review_fields["reviewReason"],
                     recovered_hint=recovered_hint,
                 ),
+                "recentDialogueLines": build_recent_dialogue_lines(
+                    source=raw_source,
+                    preview_lines=recovered_hint.get("preview_lines") if isinstance(recovered_hint, dict) else [],
+                    prompt=first_text(recovered_hint.get("prompt") if isinstance(recovered_hint, dict) else "", str(session.get("task_label") or "")),
+                    summary=display_summary or str(session.get("summary") or ""),
+                    question=str(interaction.get("question") or ""),
+                ),
                 "artifactSessionId": first_text(
                     recovered_hint.get("session_id"),
                     artifacts_payload.get("session_id"),
                     artifacts_payload.get("source_session_id"),
                 ),
+                "managedApprovalRequestKey": normalize_text(session.get("managedApprovalRequestKey")),
+                "managedApprovalSessionId": normalize_text(session.get("managedApprovalSessionId")),
+                "managedApprovalUiSessionId": normalize_text(session.get("managedApprovalUiSessionId")),
                 "jumpPid": str(jump_pid or jump_target.get("pid") or ""),
                 "jumpTty": str(jump_target.get("tty") or ""),
                 "jumpTerminal": str(jump_target.get("terminal") or ""),
@@ -4229,6 +4732,10 @@ class Backend(QObject):
         self._focus_mode = bool(prefs.get("focus_mode", False))
         self._pinned = bool(prefs.get("pinned", False))
         self._prompt_attention_enabled = bool(prefs.get("prompt_attention_enabled", True))
+        self._auto_collapse_enabled = bool(prefs.get("auto_collapse_enabled", AUTO_COLLAPSE_DEFAULT_ENABLED))
+        self._auto_collapse_seconds = self._normalize_auto_collapse_seconds(
+            int(prefs.get("auto_collapse_seconds", AUTO_COLLAPSE_DEFAULT_SECONDS) or AUTO_COLLAPSE_DEFAULT_SECONDS)
+        )
         grouped_sections = prefs.get("grouped_sections") if isinstance(prefs.get("grouped_sections"), dict) else {}
         self._grouped_section_collapsed = {
             normalize_text(key).lower(): bool(value)
@@ -4253,6 +4760,7 @@ class Backend(QObject):
         self.focusModeChanged.emit()
         self.pinnedChanged.emit()
         self.promptAttentionChanged.emit()
+        self.autoCollapseChanged.emit()
         self.telegramChanged.emit()
         self.groupedSessionsChanged.emit()
 
@@ -4278,6 +4786,13 @@ class Backend(QObject):
 
     def _clamp_collapsed_width(self, width: int) -> int:
         return max(COLLAPSED_MIN_WIDTH, min(int(width or COLLAPSED_DEFAULT_WIDTH), COLLAPSED_MAX_WIDTH))
+
+    def _normalize_auto_collapse_seconds(self, seconds: int) -> int:
+        try:
+            value = int(seconds)
+        except Exception:
+            value = AUTO_COLLAPSE_DEFAULT_SECONDS
+        return max(AUTO_COLLAPSE_MIN_SECONDS, min(value, AUTO_COLLAPSE_MAX_SECONDS))
 
     def _clamp_window_position(self, x: int, y: int, width: int, height: int) -> tuple[int, int]:
         screen_x, screen_y, screen_width, screen_height = self._available_screen_geometry()
@@ -4305,6 +4820,8 @@ class Backend(QObject):
                 "focus_mode": self._focus_mode,
                 "pinned": self._pinned,
                 "prompt_attention_enabled": self._prompt_attention_enabled,
+                "auto_collapse_enabled": self._auto_collapse_enabled,
+                "auto_collapse_seconds": self._auto_collapse_seconds,
                 "grouped_sections": self._grouped_section_collapsed,
                 "telegram": {
                     "enabled": self._telegram_enabled,
@@ -4390,6 +4907,42 @@ class Backend(QObject):
                 self._prefs_path.unlink()
         except Exception:
             pass
+
+    def _collapse_for_inactivity(self) -> None:
+        if not self._expanded:
+            return
+        self._expanded = False
+        self._auto_expand_allowed = False
+        current_prompt_key = self._prompt_key_for_session(self._prompt_session)
+        if current_prompt_key:
+            self._suppressed_prompt_key = current_prompt_key
+        self.expandedChanged.emit()
+        self._write_view_prefs()
+
+    def _handle_idle_tick(self) -> None:
+        if not self._auto_collapse_enabled or not self._expanded or self._shutdown_called:
+            return
+        idle_seconds = time.monotonic() - self._last_user_interaction_at
+        if idle_seconds >= float(self._auto_collapse_seconds):
+            self._collapse_for_inactivity()
+
+    def eventFilter(self, obj, event):
+        try:
+            event_type = event.type()
+        except Exception:
+            return False
+        if event_type in {
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+            QEvent.Type.Wheel,
+            QEvent.Type.KeyPress,
+            QEvent.Type.TouchBegin,
+            QEvent.Type.TouchUpdate,
+            QEvent.Type.TabletPress,
+            QEvent.Type.TabletMove,
+        }:
+            self.noteUserInteraction()
+        return False
 
 
 def build_tray_icon() -> QIcon:
@@ -4490,7 +5043,10 @@ def main(argv=None):
     if not engine.rootObjects():
         return 1
 
-    tray = TrayController(app, backend, engine.rootObjects()[0])
+    root_window = engine.rootObjects()[0]
+    root_window.installEventFilter(backend)
+
+    tray = TrayController(app, backend, root_window)
     app.setProperty("_vibeisland_tray", tray)
 
     return app.exec()

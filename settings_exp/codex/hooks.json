@@ -1,0 +1,97 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+          }
+        ]
+      }
+    ]
+  }
+}

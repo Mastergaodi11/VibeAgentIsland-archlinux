@@ -42,6 +42,7 @@ What works now:
 - Claude Code and Codex CLI hook integration
 - in-island approval / ask-user interaction for core Claude/Codex flows
 - provider-grouped expanded view for Claude / Codex / Gemini
+- provider section headers now carry each provider's own `5H / 7D / RUN` usage summary
 - Gemini CLI minimum viable adapter with live session recovery, approvals/questions, jump, Telegram, and peek support
 - inline third-option follow-up text entry inside the session card
 - optimistic UI response state so approval cards close quickly after click
@@ -59,6 +60,7 @@ What works now:
 - terminal peek and usage HUD are now part of the product direction, not just nice-to-have extras
 - Telegram bridge settings now persist across restarts instead of being treated like disposable runtime state
 - the collapsed notch is moving toward a smaller "sleeping" idle presentation rather than always mirroring a full session card
+- session cards are moving toward a compact three-line recent-dialogue presentation with explicit `You` / provider labeling instead of one generic summary line
 - expanded shell geometry now needs to persist as a user preference and reopen at a clamped, reasonable size instead of stretching toward full screen
 - the expanded shell is moving toward direct mouse resizing so users can tune it to their desktop layout without breaking the internal hierarchy
 - tray summon is now part of the supported Wayland UX because pinning remains best-effort under compositor policy
@@ -74,6 +76,7 @@ What is only partial today:
 - the expanded shell still needs adaptive header compaction so task titles and state pills stay readable across user-resized widths
 - multi-agent coverage beyond Claude/Codex/Gemini
 - title recovery for every live session still needs deeper artifact parsing for nonstandard transcripts and future adapters
+- Ubuntu 24.04 and Windows 11 are now explicit future targets, so provider detection and configuration lookup need to stay Linux-first but avoid unnecessary distro-specific assumptions
 
 What is not shipped yet:
 

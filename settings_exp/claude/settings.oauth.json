@@ -1,0 +1,119 @@
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "forceLoginMethod": "claudeai",
+  "permissions": {
+    "allow": [],
+    "deny": []
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-statusline"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Elicitation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

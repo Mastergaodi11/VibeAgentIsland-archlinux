@@ -13,6 +13,7 @@ Maintenance note: keep the English and Chinese editions in sync whenever this do
 - local Claude config exists at `~/.claude/settings.json`
 - local Codex config exists at `~/.codex/config.toml`
 - operator setup reference: `docs/INTEGRATION_SETUP.md`
+- portability handoff reference: `docs/PORTABILITY_ROADMAP.md`
 
 ## External Reference
 
@@ -57,6 +58,7 @@ Implemented now:
 - shell-side live session backfill from local process + artifact inspection so Claude / Codex / Gemini can still reappear even if the daemon snapshot temporarily misses one live terminal
 - hook-based adapters for Claude Code and Codex CLI
 - provider-grouped shell view model for Claude / Codex / Gemini sections
+- provider section headers now own their own `5H / 7D / RUN` display instead of one mixed top quota strip
 - Gemini CLI minimum-viable adapter path covering live detection, approvals/questions, jump, Telegram, and peek
 - Gemini usage currently reports transcript/session token totals only; stable local 5h / 7d quota windows have not been found yet
 - Codex bridge logic now strictly honors `approval_policy = "never"` so normal coding work does not surface false island approvals
@@ -80,6 +82,7 @@ Implemented now:
 - shell preferences now persist across close/reopen without deleting Telegram bridge settings
 - the collapsed notch is being refit around a narrower width and a dedicated idle/sleep presentation
 - the expanded notch header is moving to a single-line task/status layout so pills and title do not overlap at user-sized widths
+- session cards are moving from one generic summary line to a compact three-line recent-dialogue model with explicit `You` / provider labels
 - prompt attention can now be configured as an explicit shell preference; when enabled, new approval states both expand and request foreground attention
 - a tray-based summon path is being added because Wayland compositor policies may still override "always on top" in edge cases
 - shell audio playback now prefers lightweight system audio players for bundled 8-bit cues, so startup should not depend on Qt multimedia hardware-decoder probing
@@ -87,6 +90,7 @@ Implemented now:
 - collapsed dragging is being widened to most of the notch body while explicit controls stay reserved for click actions
 - a launcher layer in `tools/vibeisland.py` now owns daemon/socket/shell orchestration so public startup becomes one command plus an optional desktop entry
 - public export is now an explicit build concern: the repo can remain a local superset, while `export-public` emits a collaboration-free `vibeisland-linux` tree for GitHub release
+- a dedicated portability handoff document now tracks Ubuntu 24.04 and Windows 11 follow-up work so future sessions can start from one stable checklist instead of rediscovering KDE/Linux assumptions
 
 Partially implemented:
 
@@ -120,6 +124,7 @@ The next implementation slice therefore shifts to artifact-backed recovery and p
 That means:
 
 - expanded sessions are grouped by provider
+- each provider section header carries its own quota strip and run counter
 - section collapse state is persisted in shell prefs
 - collapsed mode highlights the single most important session across all providers
 
@@ -209,6 +214,18 @@ Current normalized provider set:
 - `claude`
 - `codex`
 - `gemini`
+
+The internal helper layout is also being consolidated so future ports can reuse the same model on:
+
+- Ubuntu 24.04
+- Windows 11
+
+That cleanup focuses on:
+
+- provider config-path discovery
+- binary discovery
+- transcript / local-artifact recovery
+- normalized usage and recent-dialogue extraction
 
 ### B. Session Aggregator
 

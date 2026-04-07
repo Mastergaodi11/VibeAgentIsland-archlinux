@@ -41,6 +41,7 @@
 - 可拖拽且能记忆位置的浮动灵动岛
 - Claude Code 与 Codex CLI 的 hook 接入
 - 按 provider 分组的展开态列表骨架，方向是 `Claude / Codex / Gemini`
+- 各 provider section header 现在会直接承担各自的 `5H / 7D / RUN` 展示
 - Gemini CLI 最小可用适配，目标覆盖 live 会话、审批 / 提问、jump、Telegram 与 peek
 - Claude / Codex 核心审批与提问可在岛内完成
 - 第三个选项支持在卡片内直接输入补充回复
@@ -59,6 +60,7 @@
 - mini terminal peek 和 usage HUD 已进入正式产品方向，而不再只是“可选增强”
 - Telegram bridge 设置现在会跨重启保留，而不再被当作一次性运行态配置
 - 折叠态 notch 正在转向更小的 `sleeping` 闲置呈现，而不是总是硬塞一张压缩会话卡
+- 会话卡正在转向更紧凑的“三行最近对话”呈现，并显式区分 `You` 与 provider 回复，而不是继续只显示一条通用摘要
 - 展开态 shell 的几何尺寸现在应当作为用户偏好被持久化，重开时要以合理大小恢复，而不是继续向接近全屏的尺寸漂移
 - 展开态 shell 正在转向支持用户直接用鼠标缩放，以适配不同桌面布局，同时不破坏内部信息层级
 - 由于 Wayland 下 pin 仍受 compositor 策略影响，托盘召回现在已经成为正式支持的交互路径
@@ -74,6 +76,7 @@
 - 展开态 shell 仍需要更强的自适应头部压缩策略，以保证用户缩放后标题和状态 pill 不会互相重叠
 - Claude / Codex / Gemini 之外的多 Agent 覆盖
 - 对非标准 transcript 和未来适配器的标题恢复还需要更深层解析
+- Ubuntu 24.04 与 Windows 11 现在已经成为明确的未来目标，因此 provider 探测与配置路径发现应尽量避免写死过多发行版特化假设
 
 尚未交付：
 

@@ -38,6 +38,7 @@ LAUNCHER_STATE_PATH = STATE_ROOT / "launcher_state.json"
 LAUNCHER_LOG_DIR = STATE_ROOT / "logs"
 DEFAULT_BIN_DIR = Path.home() / ".local" / "bin"
 DEFAULT_APPLICATIONS_DIR = Path.home() / ".local" / "share" / "applications"
+GEMINI_WRAPPER_PATH = DEFAULT_BIN_DIR / "gemini"
 MANAGED_APPROVAL_TIMEOUT = float(os.environ.get("VIBEISLAND_APPROVAL_TIMEOUT", "600"))
 MANAGED_APPROVAL_POLL_INTERVAL = 0.05
 KNOWN_TERMINALS = {
@@ -1823,9 +1824,11 @@ def managed_deny_output(reason: str) -> int:
 
 
 def gemini_managed_output(decision: str, reason: str | None = None) -> int:
-    payload: dict[str, Any] = {"decision": decision}
-    if reason and decision == "deny":
-        payload["reason"] = truncate(reason, 240)
+    payload: dict[str, Any] = {"decision": "allow"}
+    if decision == "deny":
+        payload["decision"] = "deny"
+        if reason:
+            payload["reason"] = truncate(reason, 240)
     print(json.dumps(payload, ensure_ascii=False), flush=True)
     return 0
 
@@ -4031,10 +4034,15 @@ def build_codex_hooks() -> dict[str, list[dict[str, Any]]]:
 def build_gemini_hooks() -> dict[str, list[dict[str, Any]]]:
     command = bridge_command_string("gemini-hook")
     handler = {"type": "command", "command": command, "timeout": 5000}
+    approval_handler = {
+        "type": "command",
+        "command": command,
+        "timeout": int(max(MANAGED_APPROVAL_TIMEOUT, 60.0) * 1000),
+    }
     return {
         "SessionStart": [{"hooks": [handler]}],
         "SessionEnd": [{"hooks": [handler]}],
-        "BeforeTool": [{"hooks": [handler]}],
+        "BeforeTool": [{"hooks": [approval_handler]}],
         "AfterTool": [{"hooks": [handler]}],
         "BeforeAgent": [{"hooks": [handler]}],
         "AfterAgent": [{"hooks": [handler]}],
@@ -4198,6 +4206,7 @@ def install_gemini_hooks(settings_path: Path, dry_run: bool = False) -> dict[str
     rendered = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
     backup = None
+    wrapper_result = install_gemini_wrapper(dry_run=dry_run)
     if not dry_run:
         backup = backup_file(settings_path)
         atomic_write_text(settings_path, rendered)
@@ -4206,8 +4215,163 @@ def install_gemini_hooks(settings_path: Path, dry_run: bool = False) -> dict[str
         "path": str(settings_path),
         "backup": str(backup) if backup else None,
         "events": sorted(build_gemini_hooks().keys()),
+        "wrapper": wrapper_result,
         "dry_run": dry_run,
     }
+
+
+def discover_gemini_entrypoints() -> list[Path]:
+    candidates: list[Path] = []
+    versioned_root = Path.home() / ".nvm" / "versions" / "node"
+    if versioned_root.exists():
+        for candidate in sorted(versioned_root.glob("*/bin/gemini"), reverse=True):
+            candidates.append(candidate)
+    candidates.extend(
+        [
+            Path("/usr/local/bin/gemini"),
+            Path("/usr/bin/gemini"),
+        ]
+    )
+    return [candidate for candidate in candidates if candidate.exists()]
+
+
+def discover_gemini_real_binary() -> Path | None:
+    explicit = normalize_text(os.environ.get("VIBEISLAND_GEMINI_REAL_BIN"))
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if candidate.exists():
+            try:
+                return candidate.resolve()
+            except Exception:
+                return candidate
+
+    wrapper_resolved = GEMINI_WRAPPER_PATH.resolve() if GEMINI_WRAPPER_PATH.exists() else GEMINI_WRAPPER_PATH
+    for candidate in discover_gemini_entrypoints():
+        if not candidate.exists():
+            continue
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved == wrapper_resolved:
+            continue
+        return resolved
+
+    search_path_parts: list[str] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        try:
+            if Path(entry).expanduser().resolve() == DEFAULT_BIN_DIR.resolve():
+                continue
+        except Exception:
+            pass
+        search_path_parts.append(entry)
+
+    found = shutil.which("gemini", path=os.pathsep.join(search_path_parts))
+    if not found:
+        return None
+    try:
+        resolved = Path(found).expanduser().resolve()
+    except Exception:
+        resolved = Path(found).expanduser()
+    if resolved == wrapper_resolved:
+        return None
+    return resolved
+
+
+def build_gemini_wrapper_script(real_binary: Path, node_binary_path: Path | None = None) -> str:
+    real_binary_text = str(real_binary)
+    node_binary = node_binary_path or (real_binary.parent / "node")
+    node_binary_text = str(node_binary) if node_binary.exists() else ""
+    return textwrap.dedent(
+        f"""\
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        REAL_GEMINI={shlex.quote(real_binary_text)}
+        REAL_NODE={shlex.quote(node_binary_text)}
+
+        exec_real() {{
+          if [[ -n "$REAL_NODE" && -x "$REAL_NODE" ]]; then
+            exec "$REAL_NODE" "$REAL_GEMINI" "$@"
+          fi
+          exec "$REAL_GEMINI" "$@"
+        }}
+
+        if [[ "${{VIBEISLAND_GEMINI_SKIP_APPROVAL_MODE:-}}" == "1" ]]; then
+          exec_real "$@"
+        fi
+
+        for arg in "$@"; do
+          case "$arg" in
+            --approval-mode|--approval-mode=*|--yolo|-y)
+              exec_real "$@"
+              ;;
+            --help|-h|--version|auth|login|logout|doctor|completion|hook|hooks|skill|skills|extension|extensions|install|update|upgrade|mcp)
+              exec_real "$@"
+              ;;
+          esac
+        done
+
+        exec_real --approval-mode=yolo "$@"
+        """
+    )
+
+
+def install_gemini_wrapper(dry_run: bool = False) -> dict[str, Any]:
+    real_binary = discover_gemini_real_binary()
+    entrypoints = discover_gemini_entrypoints()
+    node_binary_path: Path | None = None
+    for entrypoint in entrypoints:
+        candidate = entrypoint.parent / "node"
+        if candidate.exists():
+            node_binary_path = candidate
+            break
+    if node_binary_path is None:
+        found_node = shutil.which("node")
+        if found_node:
+            node_binary_path = Path(found_node)
+    payload = {
+        "wrapper_path": str(GEMINI_WRAPPER_PATH),
+        "real_binary": str(real_binary) if real_binary else None,
+        "entrypoints": [str(item) for item in entrypoints],
+        "installed": False,
+        "shimmed_entrypoints": [],
+        "dry_run": dry_run,
+    }
+    if real_binary is None:
+        payload["detail"] = "Gemini binary not found for wrapper installation."
+        return payload
+
+    if not dry_run:
+        DEFAULT_BIN_DIR.mkdir(parents=True, exist_ok=True)
+        backup_file(GEMINI_WRAPPER_PATH)
+        wrapper_script = build_gemini_wrapper_script(real_binary, node_binary_path=node_binary_path)
+        atomic_write_text(GEMINI_WRAPPER_PATH, wrapper_script)
+        os.chmod(GEMINI_WRAPPER_PATH, 0o755)
+        for entrypoint in entrypoints:
+            try:
+                resolved = entrypoint.resolve()
+            except Exception:
+                resolved = entrypoint
+            if resolved != real_binary:
+                continue
+            if entrypoint == GEMINI_WRAPPER_PATH:
+                continue
+            if not entrypoint.is_symlink():
+                continue
+            backup_file(entrypoint)
+            try:
+                entrypoint.unlink()
+            except FileNotFoundError:
+                pass
+            atomic_write_text(entrypoint, wrapper_script)
+            os.chmod(entrypoint, 0o755)
+            payload["shimmed_entrypoints"].append(str(entrypoint))
+        payload["installed"] = True
+
+    return payload
 
 
 def build_common_parser() -> argparse.ArgumentParser:
@@ -4353,6 +4517,8 @@ def resolve_managed_approval_request(
 ) -> bool:
     source = str(payload.get("source") or "").strip().lower()
     session_id = str(payload.get("id") or (payload.get("session") or {}).get("id") or "").strip()
+    request_key = str(payload.get("managedApprovalRequestKey") or payload.get("request_key") or "").strip()
+    managed_session_id = str(payload.get("managedApprovalSessionId") or payload.get("session_id") or "").strip()
     if not source or not session_id:
         return False
 
@@ -4371,10 +4537,26 @@ def resolve_managed_approval_request(
     def request_has_decision(candidate: dict[str, Any]) -> bool:
         return isinstance(candidate.get("decision"), dict) and bool((candidate.get("decision") or {}).get("action"))
 
+    def request_pid(candidate: dict[str, Any]) -> int | None:
+        jump_target = normalize_jump_target(candidate.get("jump_target"))
+        value = jump_target.get("pid")
+        try:
+            return int(value) if value is not None else None
+        except Exception:
+            return None
+
+    def request_is_live(candidate: dict[str, Any]) -> bool:
+        pid = request_pid(candidate)
+        if not pid:
+            return True
+        return Path(f"/proc/{pid}").exists()
+
     def request_match_score(candidate: dict[str, Any]) -> int:
         if str(candidate.get("source") or "").strip().lower() != source:
             return -1
         if request_has_decision(candidate):
+            return -1
+        if not request_is_live(candidate):
             return -1
 
         candidate_session_id = str(candidate.get("session_id") or "").strip()
@@ -4410,7 +4592,23 @@ def resolve_managed_approval_request(
         return -1
 
     path = approval_request_path(source, session_id)
-    request = read_json_file_maybe(path)
+    request = None
+    if request_key:
+        explicit_path = APPROVAL_REQUESTS_DIR / f"{safe_slug(request_key)}.json"
+        explicit_request = read_json_file_maybe(explicit_path)
+        if explicit_request and str(explicit_request.get("source") or "").strip().lower() == source and not request_has_decision(explicit_request) and request_is_live(explicit_request):
+            path = explicit_path
+            request = explicit_request
+        else:
+            return False
+    if request is None and managed_session_id:
+        managed_path = approval_request_path(source, managed_session_id)
+        managed_request = read_json_file_maybe(managed_path)
+        if managed_request and not request_has_decision(managed_request) and request_is_live(managed_request):
+            path = managed_path
+            request = managed_request
+    if request is None:
+        request = read_json_file_maybe(path)
     if not request:
         scored_matches: list[tuple[int, Path, dict[str, Any]]] = []
         for candidate_path in pending_request_files():
