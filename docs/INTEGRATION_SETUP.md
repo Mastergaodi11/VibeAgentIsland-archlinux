@@ -4,7 +4,7 @@ Chinese version: `docs/INTEGRATION_SETUP.zh-CN.md`
 
 Maintenance note: keep the English and Chinese editions in sync whenever this document changes.
 
-This document explains the local CLI configuration required for `Vibe Island` to work correctly with `Claude Code`, `Codex`, and `Gemini CLI` on another Linux machine.
+This document explains the local CLI configuration required for `Vibe Island` to work correctly with `Claude Code`, `Codex`, `Gemini CLI`, `Cursor CLI`, and `OpenCode` on another Linux machine.
 
 ## Goal
 
@@ -16,11 +16,16 @@ To make the island work normally, two integrations must exist:
 - `Gemini CLI` must forward lifecycle/tool/agent events through `~/.gemini/settings.json`
 - `Gemini CLI` does not currently expose a stable local 5-hour / 7-day quota source, so the island only shows transcript/session token totals for Gemini
 - `Gemini CLI` should also be launched through the local `~/.local/bin/gemini` wrapper installed by `python tools/vibeisland.py install gemini`, because Gemini's native approval mode otherwise competes with the island-managed approval flow
+- `Cursor CLI` must keep both `~/.cursor/cli-config.json` and `~/.cursor/hooks.json` aligned with the island install output
+- `Cursor CLI` also keeps approvals island-first by keeping `approvalMode = "default"` while routing approval checkpoints through hooks
+- `OpenCode` must load the generated local `node_modules/vibeisland-opencode-plugin` entry through `~/.config/opencode/opencode.json`
+- `Cursor` and `OpenCode` do not currently expose stable local 5-hour / 7-day quota windows, so the shell keeps their quota display honest and only shows runtime/session activity
+- `OpenCode` approval interaction has been field-verified on the primary environment, while `Cursor` approval interaction is still documented as beta / not fully field-verified
 
 This project already provides an installer:
 
 ```bash
-cd /path/to/vibeisland-linux
+cd /path/to/VibeAgentIsland-archlinux
 python tools/vibeisland.py install all
 ```
 
@@ -69,7 +74,7 @@ After this, reopen `claude` and complete the browser login flow.
 The following hook events should call:
 
 ```bash
-/usr/bin/python "/path/to/vibeisland-linux/tools/vibeisland.py" claude-hook
+/usr/bin/python "/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py" claude-hook
 ```
 
 This project currently installs these Claude events:
@@ -95,7 +100,7 @@ Example shape:
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -115,7 +120,7 @@ Important:
 If you want the island to show Claude OAuth remaining quota percentages, `Claude Code` must also call:
 
 ```bash
-/usr/bin/python "/path/to/vibeisland-linux/tools/vibeisland.py" claude-statusline
+/usr/bin/python "/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py" claude-statusline
 ```
 
 Example shape:
@@ -124,7 +129,7 @@ Example shape:
 {
   "statusLine": {
     "type": "command",
-    "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-statusline"
+    "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-statusline"
   }
 }
 ```
@@ -149,7 +154,7 @@ Config files:
 
 ```toml
 approval_policy = "never"
-notify = ["/usr/bin/python", "/path/to/vibeisland-linux/tools/vibeisland.py", "codex-notify"]
+notify = ["/usr/bin/python", "/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py", "codex-notify"]
 
 [features]
 codex_hooks = true
@@ -166,7 +171,7 @@ Notes:
 The following events should call:
 
 ```bash
-/usr/bin/python "/path/to/vibeisland-linux/tools/vibeisland.py" codex-hook
+/usr/bin/python "/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py" codex-hook
 ```
 
 This project currently installs these Codex events:
@@ -192,7 +197,7 @@ Example shape:
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -212,7 +217,7 @@ Config file:
 The following Gemini hook events should call:
 
 ```bash
-/usr/bin/python "/path/to/vibeisland-linux/tools/vibeisland.py" gemini-hook
+/usr/bin/python "/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py" gemini-hook
 ```
 
 This project currently installs these Gemini events:
@@ -234,7 +239,7 @@ Example shape:
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 600000
           }
         ]
@@ -256,14 +261,66 @@ Notes:
 - Gemini quota HUD is not part of the current public guarantee
 - stable local `5H / 7D` quota windows have not been found in current Gemini CLI local state, so the island keeps Gemini quota output honest and shows `Unavailable` instead of fabricating percentages
 
+## Cursor CLI
+
+Config files:
+
+- `~/.cursor/cli-config.json`
+- `~/.cursor/hooks.json`
+
+The installer writes both files when you run:
+
+```bash
+python tools/vibeisland.py install cursor
+```
+
+Required behavior:
+
+- keep `approvalMode = "default"`
+- keep the `statusLine` command pointing at `cursor-statusline`
+- keep the generated `hooks.json`
+
+Why:
+
+- the island uses Cursor hooks for session lifecycle, shell approval interception, MCP visibility, and subagent activity
+- Cursor shell approvals should be handled by the island, not by a second native approval layer
+- Cursor does not currently expose a stable local `5H / 7D` quota source, so only `RUN`/session activity is shown in the grouped header
+- the current beta still treats Cursor approval completion as "wired but field-verification pending," so do not over-promise it in downstream docs yet
+- provider-specific notes live in `../settings_exp/cursor/README.md`
+
+## OpenCode
+
+Config file:
+
+- `~/.config/opencode/opencode.json`
+
+The installer writes both the config entry and the local plugin when you run:
+
+```bash
+python tools/vibeisland.py install opencode
+```
+
+Required behavior:
+
+- keep `node_modules/vibeisland-opencode-plugin` in the `plugin` array
+
+Why:
+
+- OpenCode integrations are provided through a local plugin bridge
+- the plugin forwards session events, permission requests, and questions into the island
+- OpenCode does not currently expose a stable local `5H / 7D` quota source, so only `RUN`/session activity is shown in the grouped header
+- OpenCode approval interaction has been field-verified on the primary Arch Linux / KDE Plasma 6 / Wayland / Konsole environment
+- do not treat `opencode.json` as the whole setup; the generated local plugin directory is also required
+- provider-specific notes live in `../settings_exp/opencode/README.md`
+
 ## Recommended setup flow on a new machine
 
-1. Clone or copy `vibeisland-linux`
+1. Clone or copy `VibeAgentIsland-archlinux`
 2. Adjust the absolute path in the examples to the real local path
 3. Run:
 
 ```bash
-cd /path/to/vibeisland-linux
+cd /path/to/VibeAgentIsland-archlinux
 python tools/vibeisland.py install all
 ```
 
@@ -292,22 +349,25 @@ The codebase is also being cleaned up so future ports can reuse the same provide
 "forceLoginMethod": "claudeai"
 ```
 
-6. Restart `claude`, `codex`, and `gemini` if installed
+6. Restart `claude`, `codex`, `gemini`, `cursor-agent`, and `opencode` if installed
 7. Start Vibe Island with the unified launcher:
 
 ```bash
-cd /path/to/vibeisland-linux
+cd /path/to/VibeAgentIsland-archlinux
 python tools/vibeisland.py launch
 ```
 
 ## Common Setup Pitfalls
 
-- After `python tools/vibeisland.py install all`, fully close every already-open `claude`, `codex`, and `gemini` terminal, then launch fresh sessions. Old provider processes keep old hooks and old launch arguments.
+- After `python tools/vibeisland.py install all`, fully close every already-open `claude`, `codex`, `gemini`, `cursor-agent`, and `opencode` terminal, then launch fresh sessions. Old provider processes keep old hooks and old launch arguments.
 - Gemini approvals only work cleanly when the active `gemini` command resolves to the Vibe Island wrapper installed at `~/.local/bin/gemini` or the shimmed NVM entrypoint. If approvals still fall back to Gemini's native `Action Required` UI, close that terminal completely, open a fresh terminal, and confirm `~/.local/bin` comes first in `PATH`.
 - If a shell still remembers the old Gemini binary after install, run `hash -r` or open a new terminal before testing approvals again.
+- Cursor approvals depend on `approvalMode = "default"` and the installed `hooks.json`. If Cursor still fails to surface shell approvals in Vibe Island, reinstall with `python tools/vibeisland.py install cursor` and restart the CLI. Keep documenting Cursor approvals as beta / not fully field-verified until you confirm them yourself.
+- OpenCode approvals depend on the generated `node_modules/vibeisland-opencode-plugin` entry. If OpenCode questions or permissions never reach the island, reinstall with `python tools/vibeisland.py install opencode`, confirm the local plugin directory still exists, and restart `opencode` from a completely fresh terminal.
 - Claude browser OAuth and API key mode both require the same `hooks` and `statusLine` blocks. Switching auth mode must never remove those integration sections.
 - Codex approval and lifecycle reporting depend on three pieces staying in place together: `approval_policy = "never"`, `notify`, and `features.codex_hooks = true`.
 - Gemini currently has no stable public local `5H / 7D` quota-window source. `Unavailable` for Gemini quota is expected and documented behavior, not a missing render.
+- Cursor and OpenCode also intentionally skip `5H / 7D` quota output for now. This is expected behavior rather than a rendering bug.
 - On KDE Plasma + Wayland, `pin` / always-on-top remains best-effort. Tray summon is the supported fallback when another window still covers the island.
 - If you update hooks or wrapper paths and something still looks stale, restart the island shell too:
 
@@ -331,8 +391,8 @@ python -m pip install --user PyQt6
 2. Clone the project:
 
 ```bash
-git clone <your-repo-url> vibeisland-linux
-cd vibeisland-linux
+git clone <your-repo-url> VibeAgentIsland-archlinux
+cd VibeAgentIsland-archlinux
 ```
 
 3. Complete provider login first:
@@ -340,6 +400,8 @@ cd vibeisland-linux
 - run `claude` if you use Claude Code
 - run `codex` if you use Codex CLI
 - run `gemini` if you use Gemini CLI
+- run `cursor-agent` if you use Cursor CLI
+- run `opencode` if you use OpenCode
 
 4. If you want guided starter configs, begin with:
 
@@ -382,7 +444,7 @@ Shell behavior notes:
 - if you want a desktop launcher and a `vibeisland` terminal command, run:
 
 ```bash
-cd /path/to/vibeisland-linux
+cd /path/to/VibeAgentIsland-archlinux
 python tools/vibeisland.py install-desktop
 ```
 
@@ -435,7 +497,7 @@ Check:
 The hook commands use absolute paths. If the project moved, rerun:
 
 ```bash
-cd /new/path/to/vibeisland-linux
+cd /new/path/to/VibeAgentIsland-archlinux
 python tools/vibeisland.py install all
 ```
 

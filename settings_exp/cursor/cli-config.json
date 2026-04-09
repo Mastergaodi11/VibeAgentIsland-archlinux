@@ -1,0 +1,10 @@
+{
+  "approvalMode": "default",
+  "statusLine": {
+    "type": "command",
+    "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-statusline",
+    "padding": 1,
+    "updateIntervalMs": 500,
+    "timeoutMs": 1200
+  }
+}

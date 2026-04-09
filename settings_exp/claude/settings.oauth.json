@@ -9,7 +9,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-statusline"
+    "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-statusline"
   },
   "hooks": {
     "SessionStart": [
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook"
           }
         ]
       }
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -97,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]
@@ -109,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' claude-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' claude-hook",
             "timeout": 8
           }
         ]

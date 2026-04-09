@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "sessionStart",
+        "description": "Bridge Cursor session start into Vibe Island"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "sessionEnd",
+        "description": "Bridge Cursor session end into Vibe Island"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "beforeShellExecution",
+        "description": "Route Cursor shell approvals through Vibe Island"
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "afterShellExecution",
+        "description": "Bridge Cursor shell results into Vibe Island"
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "beforeMCPExecution",
+        "description": "Bridge Cursor MCP start into Vibe Island"
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "afterMCPExecution",
+        "description": "Bridge Cursor MCP result into Vibe Island"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "subagentStart",
+        "description": "Bridge Cursor subagent start into Vibe Island"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "subagentStop",
+        "description": "Bridge Cursor subagent stop into Vibe Island"
+      }
+    ],
+    "stop": [
+      {
+        "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' cursor-hook",
+        "event": "stop",
+        "description": "Bridge Cursor stop into Vibe Island"
+      }
+    ]
+  }
+}

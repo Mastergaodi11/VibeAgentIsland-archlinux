@@ -60,6 +60,10 @@ GEMINI_TMP_DIR = Path.home() / ".gemini" / "tmp"
 GEMINI_PROJECTS_PATH = Path.home() / ".gemini" / "projects.json"
 GEMINI_STATE_PATH = Path.home() / ".gemini" / "state.json"
 GEMINI_NVM_BIN = Path.home() / ".nvm" / "versions" / "node" / "v24.13.1" / "bin" / "gemini"
+CURSOR_CONFIG_PATH = Path.home() / ".cursor" / "cli-config.json"
+CURSOR_STATUSLINE_DIR = Path.home() / ".local" / "state" / "vibeisland" / "cursor_statuslines"
+OPENCODE_DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
 APPROVAL_REQUEST_STALE_SECONDS = 12 * 60 * 60
 CODEX_SESSION_PATH_RE = re.compile(r"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 URL_RE = re.compile(r"https?://([^/\s`]+)")
@@ -160,11 +164,13 @@ OPERATIONAL_LABEL_PREFIXES = (
     "npm -v",
     "pnpm -v",
 )
-PROVIDER_SECTION_ORDER = ("claude", "codex", "gemini", "collab", "other")
+PROVIDER_SECTION_ORDER = ("claude", "codex", "gemini", "cursor", "opencode", "collab", "other")
 PROVIDER_SECTION_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
     "gemini": "Gemini",
+    "cursor": "Cursor",
+    "opencode": "OpenCode",
     "collab": "Collab",
     "other": "Other",
 }
@@ -172,11 +178,20 @@ PROVIDER_SECTION_ACCENTS = {
     "claude": "#ca856f",
     "codex": "#7ea8bf",
     "gemini": "#a79aff",
+    "cursor": "#79d1bb",
+    "opencode": "#f2a46b",
     "collab": "#6fb390",
     "other": "#8d97a2",
 }
 
-_LOCAL_SESSION_CACHE: dict[str, Any] = {"expires_at": 0.0, "codex": [], "claude": [], "gemini": []}
+_LOCAL_SESSION_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "codex": [],
+    "claude": [],
+    "gemini": [],
+    "cursor": [],
+    "opencode": [],
+}
 _LIVE_PROCESS_CACHE: dict[str, Any] = {"expires_at": 0.0, "sessions": []}
 USAGE_REFRESH_INTERVAL_SECONDS = 4.0
 TELEGRAM_POLL_INTERVAL_SECONDS = 2.2
@@ -257,6 +272,21 @@ def parse_iso_timestamp(value: str | None) -> float | None:
         return stamp.astimezone(timezone.utc).timestamp()
     except Exception:
         return None
+
+
+def iso_timestamp_from_epoch(value: float | int | None) -> str:
+    from datetime import datetime, timezone
+
+    try:
+        epoch = float(value)
+    except Exception:
+        return ""
+    if epoch <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return ""
 
 
 def read_recent_jsonl(path: Path, limit: int = 200) -> list[dict[str, Any]]:
@@ -852,6 +882,8 @@ LIVE_SCAN_NONINTERACTIVE = {
     "claude": {"-p", "--print", "--help", "--version", "mcp"},
     "codex": {"exec", "review", "--help", "--version"},
     "gemini": {"--help", "--version", "-p", "--prompt", "hooks", "skills", "extensions", "mcp"},
+    "cursor": {"--help", "--version", "-h", "help", "status", "login", "logout", "models", "ls", "create-chat"},
+    "opencode": {"--help", "--version", "-h", "help", "debug", "status", "plugin", "plugins"},
 }
 
 
@@ -860,11 +892,18 @@ def classify_live_agent(argv: list[str]) -> str | None:
         return None
     lowered = [normalize_text(arg).lower() for arg in argv]
     if any(
-        "vibeisland.py" in arg or "claude-hook" in arg or "codex-hook" in arg or "codex-notify" in arg or "gemini-hook" in arg
+        "vibeisland.py" in arg
+        or "claude-hook" in arg
+        or "codex-hook" in arg
+        or "codex-notify" in arg
+        or "gemini-hook" in arg
+        or "cursor-hook" in arg
+        or "cursor-statusline" in arg
+        or "opencode-hook" in arg
         for arg in lowered
     ):
         return None
-    for source in ("claude", "codex", "gemini"):
+    for source in ("claude", "codex", "gemini", "cursor", "opencode"):
         for index, token in enumerate(lowered):
             token_name = Path(token).name
             matches_source = token_name == source
@@ -875,6 +914,10 @@ def classify_live_agent(argv: list[str]) -> str | None:
                     or "@google/gemini-cli" in token
                     or token.endswith("/gemini.js")
                 )
+            elif source == "cursor":
+                matches_source = token_name == "cursor-agent" or token_name == "cursor"
+            elif source == "opencode":
+                matches_source = token_name == "opencode" or "@opencode-ai" in token
             if not matches_source:
                 continue
             next_token = lowered[index + 1] if index + 1 < len(lowered) else ""
@@ -1237,6 +1280,10 @@ def provider_key_for_source(source: str | None, *, is_collab: bool = False) -> s
         return "codex"
     if lowered == "gemini":
         return "gemini"
+    if lowered == "cursor":
+        return "cursor"
+    if lowered == "opencode":
+        return "opencode"
     return "other"
 
 
@@ -1425,6 +1472,207 @@ def load_live_gemini_context(pid: int | None, cwd: str | None) -> dict[str, Any]
     return records[0] if records else {}
 
 
+def scan_recent_cursor_records(limit_files: int = 80) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if not CURSOR_STATUSLINE_DIR.exists():
+        return records
+
+    snapshot_paths = sorted(
+        CURSOR_STATUSLINE_DIR.glob("*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )[: max(limit_files, 40)]
+
+    for path in snapshot_paths:
+        payload = read_json_file_maybe(path)
+        session_id = normalize_text(payload.get("session_id"))
+        if not session_id:
+            continue
+        cwd = normalize_text(first_text(payload.get("cwd"), ((payload.get("workspace") or {}).get("current_dir"))))
+        session_name = normalize_text(payload.get("session_name"))
+        preview_lines = recent_meaningful_lines(payload.get("preview_lines"), limit=6)
+        prompt = normalize_text(payload.get("last_user_prompt"))
+        label_seed = first_text(session_name, prompt, preview_lines[0] if preview_lines else "", session_id)
+        label = normalize_task_label_candidate(label_seed) or truncate(label_seed, 52)
+        context_window = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
+        token_total = 0
+        for key in ("total_input_tokens", "total_output_tokens"):
+            try:
+                token_total += int(context_window.get(key) or 0)
+            except Exception:
+                continue
+        records.append(
+            {
+                "session_id": session_id,
+                "cwd": cwd,
+                "prompt": prompt or session_name,
+                "label": label,
+                "preview_lines": preview_lines or ([truncate(session_name, 120)] if session_name else []),
+                "rate_limits": {},
+                "tokens_total": token_total,
+                "mtime": path.stat().st_mtime,
+                "transcript_path": normalize_text(payload.get("transcript_path")),
+                "runtime_pid": payload.get("runtime_pid"),
+                "terminal": normalize_text(payload.get("terminal")),
+            }
+        )
+
+    records.sort(key=lambda item: item.get("mtime", 0), reverse=True)
+    return records
+
+
+def load_live_cursor_context(pid: int | None, cwd: str | None) -> dict[str, Any]:
+    normalized_cwd = normalize_text(cwd)
+    records = scan_recent_cursor_records()
+    if pid is not None:
+        for record in records:
+            try:
+                runtime_pid = int(record.get("runtime_pid") or 0)
+            except Exception:
+                runtime_pid = 0
+            if runtime_pid and runtime_pid == pid:
+                return record
+    if normalized_cwd:
+        for record in records:
+            if match_workspace_path(record.get("cwd"), normalized_cwd):
+                return record
+    return records[0] if records else {}
+
+
+def opencode_preview_for_session(
+    connection: sqlite3.Connection,
+    session_id: str,
+) -> tuple[list[str], str, int]:
+    preview_lines: list[str] = []
+    latest_prompt = ""
+    token_total = 0
+    messages = connection.execute(
+        """
+        SELECT id, data, time_updated
+        FROM message
+        WHERE session_id = ?
+        ORDER BY time_updated DESC
+        LIMIT 12
+        """,
+        (session_id,),
+    ).fetchall()
+    messages = list(reversed(messages))
+
+    for row in messages:
+        message_data = {}
+        try:
+            message_data = json.loads(row["data"] or "{}")
+        except Exception:
+            message_data = {}
+        role = normalize_text(message_data.get("role")).lower()
+        summary = normalize_text(message_data.get("summary"))
+        text_parts: list[str] = []
+        part_rows = connection.execute(
+            """
+            SELECT data, time_updated
+            FROM part
+            WHERE session_id = ? AND message_id = ?
+            ORDER BY time_updated ASC
+            """,
+            (session_id, row["id"]),
+        ).fetchall()
+        for part_row in part_rows:
+            try:
+                part_data = json.loads(part_row["data"] or "{}")
+            except Exception:
+                part_data = {}
+            part_type = normalize_text(part_data.get("type")).lower()
+            if part_type == "text":
+                text_value = normalize_text(part_data.get("text"))
+                if text_value:
+                    text_parts.append(text_value)
+            elif part_type == "reasoning":
+                text_value = normalize_text(part_data.get("text"))
+                if text_value:
+                    text_parts.append(text_value)
+            elif part_type == "tool":
+                tool_name = normalize_text(part_data.get("tool"))
+                tool_state = part_data.get("state") if isinstance(part_data.get("state"), dict) else {}
+                tool_input = tool_state.get("input") if isinstance(tool_state, dict) else {}
+                description = normalize_text(first_text(tool_name, (tool_input or {}).get("name")))
+                if description:
+                    text_parts.append(description)
+
+        text = normalize_text(first_text("\n".join(text_parts), summary))
+        if not text:
+            continue
+        if role == "user":
+            latest_prompt = text
+            append_preview_line(preview_lines, text, prefix="You: ")
+        elif role == "assistant":
+            append_preview_line(preview_lines, text, prefix="OpenCode: ")
+        else:
+            append_preview_line(preview_lines, text)
+
+        tokens = message_data.get("tokens") if isinstance(message_data.get("tokens"), dict) else {}
+        for key in ("total", "input", "output"):
+            try:
+                token_total += int(tokens.get(key) or 0)
+            except Exception:
+                continue
+
+    return recent_meaningful_lines(preview_lines, limit=6), latest_prompt, token_total
+
+
+def scan_recent_opencode_records(limit_sessions: int = 80) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if not OPENCODE_DB_PATH.exists():
+        return records
+    try:
+        with sqlite3.connect(OPENCODE_DB_PATH) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT id, directory, title, time_updated
+                FROM session
+                ORDER BY time_updated DESC
+                LIMIT ?
+                """,
+                (limit_sessions,),
+            ).fetchall()
+            for row in rows:
+                session_id = normalize_text(row["id"])
+                if not session_id:
+                    continue
+                preview_lines, prompt, token_total = opencode_preview_for_session(connection, session_id)
+                label_seed = first_text(prompt, row["title"], preview_lines[0] if preview_lines else "", session_id)
+                label = normalize_task_label_candidate(label_seed) or truncate(label_seed, 52)
+                records.append(
+                    {
+                        "session_id": session_id,
+                        "cwd": normalize_text(row["directory"]),
+                        "prompt": prompt,
+                        "label": label,
+                        "preview_lines": preview_lines or ([truncate(normalize_text(row["title"]), 120)] if normalize_text(row["title"]) else []),
+                        "rate_limits": {},
+                        "tokens_total": token_total,
+                        "mtime": float(row["time_updated"] or 0) / 1000.0,
+                        "transcript_path": str(OPENCODE_DB_PATH),
+                    }
+                )
+    except Exception:
+        return []
+
+    records.sort(key=lambda item: item.get("mtime", 0), reverse=True)
+    return records
+
+
+def load_live_opencode_context(pid: int | None, cwd: str | None) -> dict[str, Any]:
+    del pid
+    normalized_cwd = normalize_text(cwd)
+    records = scan_recent_opencode_records()
+    if normalized_cwd:
+        for record in records:
+            if match_workspace_path(record.get("cwd"), normalized_cwd):
+                return record
+    return records[0] if records else {}
+
+
 def scan_recent_codex_records(limit_files: int = 80) -> list[dict[str, Any]]:
     thread_rows: list[dict[str, Any]] = []
     if CODEX_STATE_DB.exists():
@@ -1536,17 +1784,29 @@ def local_session_records() -> dict[str, list[dict[str, Any]]]:
             "codex": _LOCAL_SESSION_CACHE["codex"],
             "claude": _LOCAL_SESSION_CACHE["claude"],
             "gemini": _LOCAL_SESSION_CACHE["gemini"],
+            "cursor": _LOCAL_SESSION_CACHE["cursor"],
+            "opencode": _LOCAL_SESSION_CACHE["opencode"],
         }
     codex_records = scan_recent_codex_records()
     claude_records = scan_recent_claude_records()
     gemini_records = scan_recent_gemini_records()
+    cursor_records = scan_recent_cursor_records()
+    opencode_records = scan_recent_opencode_records()
     _LOCAL_SESSION_CACHE.update({
         "expires_at": now + 5.0,
         "codex": codex_records,
         "claude": claude_records,
         "gemini": gemini_records,
+        "cursor": cursor_records,
+        "opencode": opencode_records,
     })
-    return {"codex": codex_records, "claude": claude_records, "gemini": gemini_records}
+    return {
+        "codex": codex_records,
+        "claude": claude_records,
+        "gemini": gemini_records,
+        "cursor": cursor_records,
+        "opencode": opencode_records,
+    }
 
 
 def discover_local_live_sessions(existing_sessions: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
@@ -1567,9 +1827,14 @@ def discover_local_live_sessions(existing_sessions: list[dict[str, Any]] | None 
     except Exception:
         proc_entries = []
 
-    from datetime import datetime, timezone
-
-    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    previous_sessions_by_id: dict[str, dict[str, Any]] = {}
+    if isinstance(cached_sessions, list):
+        for item in cached_sessions:
+            if not isinstance(item, dict):
+                continue
+            session_id = normalize_text(item.get("id"))
+            if session_id:
+                previous_sessions_by_id[session_id] = item
 
     for entry in proc_entries:
         if not entry.name.isdigit():
@@ -1608,6 +1873,29 @@ def discover_local_live_sessions(existing_sessions: list[dict[str, Any]] | None 
         if not summary:
             summary = f"Detected live {source.title()} process" + (f" via {terminal}" if terminal else "")
 
+        preview_identity = tuple(preview_lines)
+        previous_live = previous_sessions_by_id.get(session_id, {})
+        previous_updated_at = normalize_text(previous_live.get("updated_at"))
+        previous_created_at = normalize_text(previous_live.get("created_at"))
+        stable_updated_at = iso_timestamp_from_epoch(recovered.get("mtime"))
+        if not stable_updated_at:
+            previous_preview_identity = tuple(
+                normalize_text(line)
+                for line in ((previous_live.get("peek") or {}).get("preview_lines") if isinstance(previous_live.get("peek"), dict) else [])
+                if normalize_text(line)
+            )
+            if (
+                previous_updated_at
+                and normalize_text(previous_live.get("title")) == label
+                and normalize_text(previous_live.get("summary")) == summary
+                and previous_preview_identity == preview_identity
+            ):
+                stable_updated_at = previous_updated_at
+        if not stable_updated_at:
+            stable_updated_at = previous_updated_at or iso_timestamp_from_epoch(now)
+
+        stable_created_at = previous_created_at or stable_updated_at
+
         results.append(
             {
                 "id": session_id,
@@ -1620,8 +1908,8 @@ def discover_local_live_sessions(existing_sessions: list[dict[str, Any]] | None 
                 "state": "running",
                 "summary": summary,
                 "attention_score": 20,
-                "updated_at": now_iso,
-                "created_at": now_iso,
+                "updated_at": stable_updated_at,
+                "created_at": stable_created_at,
                 "last_event_kind": "session_heartbeat",
                 "interaction": {},
                 "review": {},
@@ -1658,12 +1946,16 @@ def discover_local_live_sessions(existing_sessions: list[dict[str, Any]] | None 
 def recover_local_session_hint(source: str, cwd: str | None, *, pid: int | None = None) -> dict[str, Any]:
     normalized_source = normalize_text(source).lower()
     normalized_cwd = normalize_text(cwd)
-    if normalized_source not in {"codex", "claude", "gemini"}:
+    if normalized_source not in {"codex", "claude", "gemini", "cursor", "opencode"}:
         return {}
     if normalized_source == "codex":
         exact = load_live_codex_context(pid, normalized_cwd)
     elif normalized_source == "claude":
         exact = load_live_claude_context(pid, normalized_cwd)
+    elif normalized_source == "cursor":
+        exact = load_live_cursor_context(pid, normalized_cwd)
+    elif normalized_source == "opencode":
+        exact = load_live_opencode_context(pid, normalized_cwd)
     else:
         exact = load_live_gemini_context(pid, normalized_cwd)
     if exact:
@@ -2338,7 +2630,15 @@ def collect_usage_totals() -> dict[str, int]:
     codex_total = sum(int(item.get("tokens_total") or 0) for item in records.get("codex", []))
     claude_total = sum(int(item.get("tokens_total") or 0) for item in records.get("claude", []))
     gemini_total = sum(int(item.get("tokens_total") or 0) for item in records.get("gemini", []))
-    return {"codex": codex_total, "claude": claude_total, "gemini": gemini_total}
+    cursor_total = sum(int(item.get("tokens_total") or 0) for item in records.get("cursor", []))
+    opencode_total = sum(int(item.get("tokens_total") or 0) for item in records.get("opencode", []))
+    return {
+        "codex": codex_total,
+        "claude": claude_total,
+        "gemini": gemini_total,
+        "cursor": cursor_total,
+        "opencode": opencode_total,
+    }
 
 
 def usage_display_snapshot(
@@ -2349,7 +2649,13 @@ def usage_display_snapshot(
     del started_at
     baseline_totals = baseline or {}
     current_totals = collect_usage_totals()
-    active_records: dict[str, list[dict[str, Any]]] = {"codex": [], "claude": [], "gemini": []}
+    active_records: dict[str, list[dict[str, Any]]] = {
+        "codex": [],
+        "claude": [],
+        "gemini": [],
+        "cursor": [],
+        "opencode": [],
+    }
     seen: set[tuple[str, str]] = set()
 
     for session in sessions or []:
@@ -2388,9 +2694,13 @@ def usage_display_snapshot(
     codex_delta = max(0, current_totals.get("codex", 0) - baseline_totals.get("codex", 0))
     claude_delta = max(0, current_totals.get("claude", 0) - baseline_totals.get("claude", 0))
     gemini_delta = max(0, current_totals.get("gemini", 0) - baseline_totals.get("gemini", 0))
+    cursor_delta = max(0, current_totals.get("cursor", 0) - baseline_totals.get("cursor", 0))
+    opencode_delta = max(0, current_totals.get("opencode", 0) - baseline_totals.get("opencode", 0))
     claude_tokens_5h = sum(int(item.get("usage_5h") or 0) for item in active_records["claude"])
     claude_tokens_7d = sum(int(item.get("usage_7d") or 0) for item in active_records["claude"])
     gemini_tokens_total = sum(int(item.get("tokens_total") or 0) for item in active_records["gemini"])
+    cursor_tokens_total = sum(int(item.get("tokens_total") or 0) for item in active_records["cursor"])
+    opencode_tokens_total = sum(int(item.get("tokens_total") or 0) for item in active_records["opencode"])
     codex_mode = "tokens" if codex_auth_mode() == "api_key" else "quota"
     claude_statusline = load_claude_statusline_snapshot()
     claude_rate_limits = claude_statusline.get("rate_limits") if isinstance(claude_statusline.get("rate_limits"), dict) else {}
@@ -2428,6 +2738,22 @@ def usage_display_snapshot(
             "sevenDay": gemini_quota.get("sevenDay") or "unavailable",
             "sessionTokens": gemini_delta,
             "detail": f"Transcript tokens {gemini_tokens_total:,}" if gemini_tokens_total else (gemini_quota.get("detail") or "Quota unavailable from local Gemini state"),
+        },
+        "cursor": {
+            "label": "Cursor",
+            "mode": "usage",
+            "fiveHour": "unavailable",
+            "sevenDay": "unavailable",
+            "sessionTokens": cursor_delta if cursor_delta > 0 else len(active_records["cursor"]),
+            "detail": f"Transcript tokens {cursor_tokens_total:,}" if cursor_tokens_total else "Quota not tracked for Cursor CLI",
+        },
+        "opencode": {
+            "label": "OpenCode",
+            "mode": "usage",
+            "fiveHour": "unavailable",
+            "sevenDay": "unavailable",
+            "sessionTokens": opencode_delta if opencode_delta > 0 else len(active_records["opencode"]),
+            "detail": f"Transcript tokens {opencode_tokens_total:,}" if opencode_tokens_total else "Quota not tracked for OpenCode",
         },
     }
 
@@ -2650,12 +2976,14 @@ def should_display_live_session(session: dict[str, Any]) -> bool:
     if bool(session.get("isCollabSession")):
         return True
     source = normalize_text(session.get("source")).lower()
-    if source not in {"claude", "codex", "gemini"}:
+    if source not in {"claude", "codex", "gemini", "cursor", "opencode"}:
         return True
     pid = session_runtime_pid(session)
     if pid is not None and pid_is_alive(pid):
         return True
     state = normalize_text(session.get("state")).lower()
+    if bool(session.get("needsResponse")) or state in {"blocked", "waiting_user"}:
+        return True
     if state in {"completed", "failed", "idle"} and not bool(session.get("needsResponse")):
         return False
     return False
@@ -2665,7 +2993,7 @@ def session_matches_local_live(session: dict[str, Any], local_live_sessions: lis
     if not isinstance(session, dict):
         return False
     source = normalize_text(session.get("source")).lower()
-    if source not in {"claude", "codex", "gemini"}:
+    if source not in {"claude", "codex", "gemini", "cursor", "opencode"}:
         return True
     session_id = normalize_text(session.get("id"))
     jump_target = session.get("jump_target") if isinstance(session.get("jump_target"), dict) else {}
@@ -2694,7 +3022,7 @@ def session_matches_local_live(session: dict[str, Any], local_live_sessions: lis
             return True
         if session_pid and live_pid and session_pid == live_pid:
             return True
-        if session_workspace and live_workspace and session_workspace == live_workspace and source == "gemini":
+        if session_workspace and live_workspace and session_workspace == live_workspace and source in {"gemini", "opencode", "cursor"}:
             return True
     return False
 
@@ -2708,7 +3036,7 @@ def should_keep_provider_session(
     if not isinstance(session, dict):
         return False
     source = normalize_text(session.get("source")).lower()
-    if source not in {"claude", "codex", "gemini"}:
+    if source not in {"claude", "codex", "gemini", "cursor", "opencode"}:
         return True
     if normalize_text(session.get("id")).startswith("live::"):
         return True
@@ -2752,9 +3080,10 @@ class Backend(QObject):
     autoCollapseChanged = pyqtSignal()
     connectedChanged = pyqtSignal()
     geometryChanged = pyqtSignal()
+    appearanceChanged = pyqtSignal()
     usageChanged = pyqtSignal()
     telegramChanged = pyqtSignal()
-    attentionRequested = pyqtSignal()
+    attentionRequested = pyqtSignal(str)
     summonRequested = pyqtSignal()
 
     def __init__(self, socket_path: str, state_path: Path):
@@ -2781,6 +3110,8 @@ class Backend(QObject):
         self._prompt_attention_enabled = True
         self._auto_collapse_enabled = AUTO_COLLAPSE_DEFAULT_ENABLED
         self._auto_collapse_seconds = AUTO_COLLAPSE_DEFAULT_SECONDS
+        self._aero_glass_enabled = True
+        self._aero_glass_transparency = 5
         self._last_user_interaction_at = time.monotonic()
         self._connected = False
         self._window_x = -1
@@ -2898,6 +3229,14 @@ class Backend(QObject):
     def autoCollapseSeconds(self):
         return self._auto_collapse_seconds
 
+    @pyqtProperty(bool, notify=appearanceChanged)
+    def aeroGlassEnabled(self):
+        return self._aero_glass_enabled
+
+    @pyqtProperty(int, notify=appearanceChanged)
+    def aeroGlassTransparency(self):
+        return self._aero_glass_transparency
+
     @pyqtProperty("QVariantMap", notify=usageChanged)
     def usage(self):
         return self._usage
@@ -3013,6 +3352,20 @@ class Backend(QObject):
         self.noteUserInteraction()
         if changed:
             self.autoCollapseChanged.emit()
+            self._write_view_prefs()
+
+    @pyqtSlot(bool, int)
+    def saveAeroGlassSettings(self, enabled: bool, transparency: int):
+        normalized_transparency = self._normalize_aero_glass_transparency(transparency)
+        changed = (
+            bool(enabled) != self._aero_glass_enabled
+            or normalized_transparency != self._aero_glass_transparency
+        )
+        self._aero_glass_enabled = bool(enabled)
+        self._aero_glass_transparency = normalized_transparency
+        self.noteUserInteraction()
+        if changed:
+            self.appearanceChanged.emit()
             self._write_view_prefs()
 
     @pyqtSlot(str)
@@ -3708,6 +4061,8 @@ class Backend(QObject):
             "completed": "completed.wav",
             "peek-send": "peek-send.wav",
             "toggle": "toggle.wav",
+            "cursor": "cursor.wav",
+            "opencode": "opencode.wav",
         }.items():
             sound_path = SOUND_ASSET_DIR / filename
             if not sound_path.exists():
@@ -4224,7 +4579,7 @@ class Backend(QObject):
                 self._expanded = True
                 self.expandedChanged.emit()
             if self._prompt_attention_enabled and prompt_is_new and not prompt_is_suppressed:
-                self.attentionRequested.emit()
+                self.attentionRequested.emit(normalize_text(self._prompt_session.get("id")))
         elif self._blocked_count:
             self._headline = "Attention needed"
         elif self._active_count:
@@ -4252,21 +4607,32 @@ class Backend(QObject):
 
         urgent_triggered = False
         completed_triggered = False
+        urgent_sound_id = "approval"
+        completed_sound_id = "completed"
         for session in sessions:
             previous = self._previous_states.get(session["id"])
             current = session["state"]
+            source_key = provider_key_for_source(session.get("source"))
             if current in {"Blocked", "Waiting User"} and previous != current:
                 urgent_triggered = True
+                if source_key == "cursor":
+                    urgent_sound_id = "cursor"
+                elif source_key == "opencode":
+                    urgent_sound_id = "opencode"
                 break
             if current == "Completed" and previous != current:
                 completed_triggered = True
+                if source_key == "cursor":
+                    completed_sound_id = "cursor"
+                elif source_key == "opencode":
+                    completed_sound_id = "opencode"
 
         self._previous_states = {session["id"]: session["state"] for session in sessions}
 
         if urgent_triggered:
-            self._play_sound("approval")
+            self._play_sound(urgent_sound_id)
         elif completed_triggered:
-            self._play_sound("completed")
+            self._play_sound(completed_sound_id)
 
     def _play_sound(self, sound_id: str):
         self._last_sound_at = time.monotonic()
@@ -4554,7 +4920,7 @@ class Backend(QObject):
         if state_text not in {"Blocked", "Waiting User"}:
             return False
         source_text = normalize_text(session.get("source")).lower()
-        if source_text not in {"claude", "codex", "gemini"}:
+        if source_text not in {"claude", "codex", "gemini", "cursor", "opencode"}:
             return False
         choices = session.get("choices") if isinstance(session.get("choices"), list) else []
         if len(choices) == 0:
@@ -4736,6 +5102,11 @@ class Backend(QObject):
         self._auto_collapse_seconds = self._normalize_auto_collapse_seconds(
             int(prefs.get("auto_collapse_seconds", AUTO_COLLAPSE_DEFAULT_SECONDS) or AUTO_COLLAPSE_DEFAULT_SECONDS)
         )
+        appearance = prefs.get("appearance", {}) if isinstance(prefs.get("appearance"), dict) else {}
+        self._aero_glass_enabled = bool(appearance.get("aero_glass_enabled", True))
+        self._aero_glass_transparency = self._normalize_aero_glass_transparency(
+            int(appearance.get("aero_glass_transparency", 5) or 5)
+        )
         grouped_sections = prefs.get("grouped_sections") if isinstance(prefs.get("grouped_sections"), dict) else {}
         self._grouped_section_collapsed = {
             normalize_text(key).lower(): bool(value)
@@ -4761,6 +5132,7 @@ class Backend(QObject):
         self.pinnedChanged.emit()
         self.promptAttentionChanged.emit()
         self.autoCollapseChanged.emit()
+        self.appearanceChanged.emit()
         self.telegramChanged.emit()
         self.groupedSessionsChanged.emit()
 
@@ -4794,6 +5166,13 @@ class Backend(QObject):
             value = AUTO_COLLAPSE_DEFAULT_SECONDS
         return max(AUTO_COLLAPSE_MIN_SECONDS, min(value, AUTO_COLLAPSE_MAX_SECONDS))
 
+    def _normalize_aero_glass_transparency(self, transparency: int) -> int:
+        try:
+            value = int(transparency)
+        except Exception:
+            value = 5
+        return max(0, min(value, 100))
+
     def _clamp_window_position(self, x: int, y: int, width: int, height: int) -> tuple[int, int]:
         screen_x, screen_y, screen_width, screen_height = self._available_screen_geometry()
         top_margin = max(screen_y + 12, 18)
@@ -4822,6 +5201,10 @@ class Backend(QObject):
                 "prompt_attention_enabled": self._prompt_attention_enabled,
                 "auto_collapse_enabled": self._auto_collapse_enabled,
                 "auto_collapse_seconds": self._auto_collapse_seconds,
+                "appearance": {
+                    "aero_glass_enabled": self._aero_glass_enabled,
+                    "aero_glass_transparency": self._aero_glass_transparency,
+                },
                 "grouped_sections": self._grouped_section_collapsed,
                 "telegram": {
                     "enabled": self._telegram_enabled,

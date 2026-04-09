@@ -7,6 +7,8 @@ pub enum AgentSource {
     Claude,
     Codex,
     Gemini,
+    Cursor,
+    Opencode,
     Unknown,
 }
 

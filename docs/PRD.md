@@ -41,9 +41,11 @@ What works now:
 - draggable floating island with persistent position during runtime
 - Claude Code and Codex CLI hook integration
 - in-island approval / ask-user interaction for core Claude/Codex flows
-- provider-grouped expanded view for Claude / Codex / Gemini
+- provider-grouped expanded view for Claude / Codex / Gemini / Cursor / OpenCode
 - provider section headers now carry each provider's own `5H / 7D / RUN` usage summary
 - Gemini CLI minimum viable adapter with live session recovery, approvals/questions, jump, Telegram, and peek support
+- Cursor CLI adapter with status line, hooks, approvals/questions, jump, Telegram, and peek support
+- OpenCode adapter with local plugin bridge, approvals/questions, jump, Telegram, and peek support
 - inline third-option follow-up text entry inside the session card
 - optimistic UI response state so approval cards close quickly after click
 - best-effort jump back to existing terminals, with KDE Wayland / Konsole working well
@@ -74,7 +76,7 @@ What is only partial today:
 - UI fidelity compared with the original Mac app, even though the information hierarchy is now much improved
 - always-on-top behavior is still partly compositor-dependent, so pinning needs best-effort engineering plus a graceful fallback story
 - the expanded shell still needs adaptive header compaction so task titles and state pills stay readable across user-resized widths
-- multi-agent coverage beyond Claude/Codex/Gemini
+- multi-agent coverage beyond Claude/Codex/Gemini/Cursor/OpenCode
 - title recovery for every live session still needs deeper artifact parsing for nonstandard transcripts and future adapters
 - Ubuntu 24.04 and Windows 11 are now explicit future targets, so provider detection and configuration lookup need to stay Linux-first but avoid unnecessary distro-specific assumptions
 
@@ -117,6 +119,8 @@ System notifications alone are not enough because they do not preserve session c
 - Claude Code
 - Codex CLI
 - Gemini CLI (minimum viable support)
+- Cursor CLI
+- OpenCode
 
 ### Supported states in MVP
 
@@ -151,7 +155,7 @@ The expanded shell should now default to grouped provider sections instead of on
 
 Rules:
 
-- show separate sections for `Claude`, `Codex`, and `Gemini`
+- show separate sections for `Claude`, `Codex`, `Gemini`, `Cursor`, and `OpenCode`
 - keep blocked / waiting sessions at the top of each section
 - keep the replay timeline above the grouped sections as one cross-provider history strip
 - keep collapsed mode focused on the single most important live session, or show `sleeping` when everything is idle
@@ -312,6 +316,7 @@ When plan text changes, show what changed instead of dumping the whole plan agai
 - for API-key backed sessions, show the total token usage accumulated since the island was opened
 - missing provider data should degrade gracefully to `unavailable` instead of lying
 - if a provider cannot expose a reliable quota number locally, the UI should say `unavailable` instead of guessing
+- Cursor and OpenCode should intentionally expose `RUN` activity only until they provide stable local quota windows
 
 ### Terminal peek
 

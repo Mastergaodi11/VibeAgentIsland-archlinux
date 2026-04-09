@@ -40,7 +40,7 @@
 - 重开后自动重新扫描正在运行的 Claude / Codex 会话
 - 可拖拽且能记忆位置的浮动灵动岛
 - Claude Code 与 Codex CLI 的 hook 接入
-- 按 provider 分组的展开态列表骨架，方向是 `Claude / Codex / Gemini`
+- 按 provider 分组的展开态列表骨架，方向是 `Claude / Codex / Gemini / Cursor / OpenCode`
 - 各 provider section header 现在会直接承担各自的 `5H / 7D / RUN` 展示
 - Gemini CLI 最小可用适配，目标覆盖 live 会话、审批 / 提问、jump、Telegram 与 peek
 - Claude / Codex 核心审批与提问可在岛内完成
@@ -74,7 +74,7 @@
 - 与原版 Mac 产品相比，UI 质感仍有差距
 - 置顶行为仍部分受 compositor 限制，因此 pin 功能还需要“尽量保证 + 友好回退”两手准备
 - 展开态 shell 仍需要更强的自适应头部压缩策略，以保证用户缩放后标题和状态 pill 不会互相重叠
-- Claude / Codex / Gemini 之外的多 Agent 覆盖
+- Claude / Codex / Gemini / Cursor / OpenCode 之外的多 Agent 覆盖
 - 对非标准 transcript 和未来适配器的标题恢复还需要更深层解析
 - Ubuntu 24.04 与 Windows 11 现在已经成为明确的未来目标，因此 provider 探测与配置路径发现应尽量避免写死过多发行版特化假设
 
@@ -307,6 +307,7 @@
 - 若是订阅额度模式，则显示 5 小时和 7 天剩余额度百分比
 - 若是 API key 计费模式，则显示本次灵动岛开启以来累计消耗的 token
 - 如果拿不到可靠数据，必须诚实显示 `unavailable`
+- Cursor 与 OpenCode 当前应当只显示 `RUN`，不显示伪造的 `5H / 7D`
 - 某供应商若本地无法暴露剩余额度，不要瞎猜
 
 ### Terminal Peek

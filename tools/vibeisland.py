@@ -19,6 +19,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,9 +32,16 @@ CODEX_CONFIG_PATH = Path.home() / ".codex" / "config.toml"
 CODEX_HOOKS_PATH = Path.home() / ".codex" / "hooks.json"
 CODEX_HISTORY_PATH = Path.home() / ".codex" / "history.jsonl"
 GEMINI_SETTINGS_PATH = Path.home() / ".gemini" / "settings.json"
+CURSOR_CONFIG_PATH = Path.home() / ".cursor" / "cli-config.json"
+CURSOR_HOOKS_PATH = Path.home() / ".cursor" / "hooks.json"
+OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
+OPENCODE_ALT_CONFIG_PATH = Path.home() / ".config" / "opencode" / "config.json"
+OPENCODE_DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+OPENCODE_CONFIG_ROOT = Path.home() / ".config" / "opencode"
 BACKUP_ROOT = Path.home() / ".config" / "vibeisland" / "backups"
 STATE_ROOT = Path(os.environ.get("VIBEISLAND_STATE_DIR") or (Path.home() / ".local" / "state" / "vibeisland"))
 CLAUDE_STATUSLINE_PATH = STATE_ROOT / "claude_statusline.json"
+CURSOR_STATUSLINE_DIR = STATE_ROOT / "cursor_statuslines"
 APPROVAL_REQUESTS_DIR = STATE_ROOT / "approval_requests"
 APPROVAL_RULES_DIR = STATE_ROOT / "approval_rules"
 LAUNCHER_STATE_PATH = STATE_ROOT / "launcher_state.json"
@@ -39,6 +49,29 @@ LAUNCHER_LOG_DIR = STATE_ROOT / "logs"
 DEFAULT_BIN_DIR = Path.home() / ".local" / "bin"
 DEFAULT_APPLICATIONS_DIR = Path.home() / ".local" / "share" / "applications"
 GEMINI_WRAPPER_PATH = DEFAULT_BIN_DIR / "gemini"
+OPENCODE_PLUGIN_NAME = "vibeisland-opencode-plugin"
+OPENCODE_PLUGIN_SOURCE_DIR = OPENCODE_CONFIG_ROOT / "plugins"
+OPENCODE_PLUGIN_FILE = OPENCODE_PLUGIN_SOURCE_DIR / f"{OPENCODE_PLUGIN_NAME}.js"
+OPENCODE_PLUGIN_PACKAGE_DIR = OPENCODE_PLUGIN_SOURCE_DIR / OPENCODE_PLUGIN_NAME
+OPENCODE_PLUGIN_PACKAGE_FILE = OPENCODE_PLUGIN_PACKAGE_DIR / "index.mjs"
+OPENCODE_PLUGIN_NODEMODULE_DIR = OPENCODE_CONFIG_ROOT / "node_modules" / OPENCODE_PLUGIN_NAME
+OPENCODE_PLUGIN_NODEMODULE_FILE = OPENCODE_PLUGIN_NODEMODULE_DIR / "index.mjs"
+OPENCODE_PLUGIN_LEGACY_ENTRIES = {
+    OPENCODE_PLUGIN_NAME,
+    f"node_modules/{OPENCODE_PLUGIN_NAME}",
+    OPENCODE_PLUGIN_NODEMODULE_DIR.resolve().as_uri(),
+    f"./plugins/{OPENCODE_PLUGIN_NAME}/index.mjs",
+    f"./plugins/{OPENCODE_PLUGIN_NAME}",
+    f"./plugins/{OPENCODE_PLUGIN_NAME}.js",
+    str(OPENCODE_PLUGIN_FILE),
+    OPENCODE_PLUGIN_FILE.resolve().as_uri(),
+    str(OPENCODE_PLUGIN_PACKAGE_DIR),
+    OPENCODE_PLUGIN_PACKAGE_DIR.resolve().as_uri(),
+    str(OPENCODE_PLUGIN_PACKAGE_FILE),
+    OPENCODE_PLUGIN_PACKAGE_FILE.resolve().as_uri(),
+    str(OPENCODE_PLUGIN_NODEMODULE_FILE),
+    OPENCODE_PLUGIN_NODEMODULE_FILE.resolve().as_uri(),
+}
 MANAGED_APPROVAL_TIMEOUT = float(os.environ.get("VIBEISLAND_APPROVAL_TIMEOUT", "600"))
 MANAGED_APPROVAL_POLL_INTERVAL = 0.05
 KNOWN_TERMINALS = {
@@ -111,6 +144,37 @@ LIVE_SCAN_NONINTERACTIVE = {
         "plugins",
         "update",
         "upgrade",
+        "--help",
+        "-h",
+    },
+    "cursor": {
+        "auth",
+        "completion",
+        "config",
+        "create-chat",
+        "doctor",
+        "help",
+        "login",
+        "logout",
+        "ls",
+        "models",
+        "resume",
+        "status",
+        "--help",
+        "-h",
+    },
+    "opencode": {
+        "auth",
+        "completion",
+        "config",
+        "debug",
+        "help",
+        "login",
+        "logout",
+        "plugin",
+        "plugins",
+        "serve",
+        "status",
         "--help",
         "-h",
     },
@@ -231,6 +295,8 @@ BOILERPLATE_REPLY_HINTS = (
     "bash wants approval",
     "claude needs your permission",
     "codex wants approval",
+    "cursor wants approval",
+    "opencode wants approval",
     "approval request",
     "permission request",
     "agent-turn-complete",
@@ -266,12 +332,18 @@ LOW_SIGNAL_LABEL_PREFIXES = (
     "stop hook",
     "codex session",
     "claude session",
+    "cursor session",
+    "opencode session",
     "agent session",
     "codex @",
     "claude @",
+    "cursor @",
+    "opencode @",
     "agent @",
     "codex ·",
     "claude ·",
+    "cursor ·",
+    "opencode ·",
     "agent ·",
 )
 COMMAND_PROGRAM_ALIASES = {
@@ -369,11 +441,15 @@ def is_low_signal_task_label(text: str | None) -> bool:
             "codex @ ",
             "claude @ ",
             "gemini @ ",
+            "cursor @ ",
+            "opencode @ ",
             "openclaw @ ",
             "agent @ ",
             "codex session",
             "claude session",
             "gemini session",
+            "cursor session",
+            "opencode session",
             "openclaw session",
             "agent session",
         )
@@ -1100,6 +1176,63 @@ def build_shell_command(socket_path: str) -> list[str]:
     return [sys.executable, "-m", "apps.shell", "--socket", socket_path]
 
 
+def read_proc_cmdline(pid: int | None) -> list[str]:
+    if not pid or pid <= 0:
+        return []
+    path = Path("/proc") / str(int(pid)) / "cmdline"
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return []
+    if not raw:
+        return []
+    return [chunk.decode("utf-8", "ignore") for chunk in raw.split(b"\0") if chunk]
+
+
+def matching_shell_pids(socket_path: str) -> list[int]:
+    current_pid = os.getpid()
+    matches: list[int] = []
+    try:
+        proc_entries = list(Path("/proc").iterdir())
+    except Exception:
+        return matches
+    for entry in proc_entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            pid = int(entry.name)
+        except Exception:
+            continue
+        if pid == current_pid or not process_alive(pid):
+            continue
+        argv = read_proc_cmdline(pid)
+        if not argv:
+            continue
+        joined = "\0".join(argv)
+        if "apps.shell" not in joined:
+            continue
+        if "--socket" in argv:
+            try:
+                socket_value = argv[argv.index("--socket") + 1]
+            except Exception:
+                socket_value = ""
+            if normalize_text(socket_value) == normalize_text(socket_path):
+                matches.append(pid)
+                continue
+        env_socket = ""
+        try:
+            env_raw = (Path("/proc") / str(pid) / "environ").read_bytes()
+            for chunk in env_raw.split(b"\0"):
+                if chunk.startswith(b"VIBEISLAND_SOCKET="):
+                    env_socket = chunk.split(b"=", 1)[1].decode("utf-8", "ignore")
+                    break
+        except Exception:
+            env_socket = ""
+        if normalize_text(env_socket) == normalize_text(socket_path):
+            matches.append(pid)
+    return sorted(set(matches))
+
+
 def log_path(name: str) -> Path:
     safe_name = safe_slug(name)
     return LAUNCHER_LOG_DIR / f"{safe_name}.log"
@@ -1640,6 +1773,44 @@ def approval_rule_for_payload(source: str, payload: dict[str, Any]) -> dict[str,
             return {"kind": "command_exact", "tool_name": tool_name, "command": command}
         if tool_name:
             return {"kind": "tool_name", "tool_name": tool_name}
+    if lowered_source == "cursor":
+        command = str(payload.get("command") or ((payload.get("args") or {}).get("command") or "")).strip()
+        if command:
+            return {"kind": "command_exact", "tool_name": "Bash", "command": command}
+        event_name = normalize_text(payload.get("hook_event_name") or payload.get("event")).lower()
+        if event_name:
+            return {"kind": "tool_name", "tool_name": event_name}
+    if lowered_source == "opencode":
+        permission_payload = payload.get("permission") if isinstance(payload.get("permission"), dict) else {}
+        permission = normalize_text(
+            first_present(
+                payload.get("tool_name"),
+                permission_payload.get("type"),
+                permission_payload.get("permission"),
+                payload.get("permission"),
+            )
+        )
+        raw_pattern = permission_payload.get("pattern")
+        patterns = payload.get("patterns") if isinstance(payload.get("patterns"), list) else []
+        if isinstance(raw_pattern, str) and raw_pattern.strip():
+            patterns = [raw_pattern.strip(), *patterns]
+        elif isinstance(raw_pattern, list):
+            patterns = [str(item).strip() for item in raw_pattern if str(item).strip()] + patterns
+        metadata = permission_payload.get("metadata") if isinstance(permission_payload.get("metadata"), dict) else {}
+        command = normalize_text(
+            first_present(
+                *patterns,
+                metadata.get("command"),
+                metadata.get("detail"),
+                metadata.get("title"),
+                permission_payload.get("title"),
+                permission,
+            )
+        )
+        if command:
+            return {"kind": "command_exact", "tool_name": permission or "permission", "command": command}
+        if permission:
+            return {"kind": "tool_name", "tool_name": permission}
     return None
 
 
@@ -1668,6 +1839,13 @@ def build_managed_approval_request(
     tool_input = payload.get("tool_input") or {}
     cwd = str(payload.get("cwd") or os.getcwd())
     session_id = str(payload.get("session_id") or "")
+    request_id = normalize_text(
+        first_present(
+            payload.get("request_id"),
+            payload.get("requestID"),
+            payload.get("requestId"),
+        )
+    )
     title_seed = first_present(tool_input.get("command"), tool_input.get("file_path"), question, summary)
     stable_label = stable_task_label_for_event(
         source,
@@ -1692,6 +1870,7 @@ def build_managed_approval_request(
         "source": source,
         "session_id": session_id,
         "ui_session_id": session_id,
+        "request_id": request_id,
         "run_id": str(payload.get("turn_id") or ""),
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -1833,6 +2012,172 @@ def gemini_managed_output(decision: str, reason: str | None = None) -> int:
     return 0
 
 
+def cursor_managed_output(decision: str, reason: str | None = None) -> int:
+    if decision == "deny":
+        print(truncate(reason, 240) or "Blocked by Vibe Island.", file=sys.stderr, flush=True)
+        return 2
+    return 0
+
+
+def opencode_managed_output(decision: str) -> int:
+    payload = {"status": "allow" if decision != "deny" else "deny"}
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    return 0
+
+
+def opencode_managed_reply_output(reply: str, request_id: str, message: str = "") -> int:
+    payload: dict[str, Any] = {
+        "requestID": str(request_id or "").strip(),
+        "reply": str(reply or "reject").strip() or "reject",
+    }
+    trimmed_message = str(message or "").strip()
+    if trimmed_message:
+        payload["message"] = trimmed_message
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    return 0
+
+
+def post_opencode_permission_reply(
+    *,
+    server_url: str,
+    request_id: str,
+    reply: str,
+    directory: str = "",
+    workspace: str = "",
+    message: str = "",
+) -> bool:
+    base_url = str(server_url or "").strip()
+    request_token = str(request_id or "").strip()
+    reply_token = str(reply or "").strip()
+    if not base_url or not request_token or not reply_token:
+        return False
+
+    request_url = base_url.rstrip("/") + f"/permission/{urllib_parse.quote(request_token, safe='')}/reply"
+    query: dict[str, str] = {}
+    if str(directory or "").strip():
+        query["directory"] = str(directory).strip()
+    normalized_workspace = str(workspace or "").strip()
+    if normalized_workspace == "/" and str(directory or "").strip() and str(directory).strip() != "/":
+        normalized_workspace = str(directory).strip()
+    if normalized_workspace:
+        query["workspace"] = normalized_workspace
+    if query:
+        request_url += "?" + urllib_parse.urlencode(query)
+
+    payload: dict[str, Any] = {"reply": reply_token}
+    trimmed_message = str(message or "").strip()
+    if trimmed_message:
+        payload["message"] = trimmed_message
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request_obj = urllib_request.Request(
+        request_url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request_obj, timeout=10) as response:
+            status_code = getattr(response, "status", None) or response.getcode()
+            return int(status_code) == 200
+    except urllib_error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", "ignore")
+        except Exception:
+            detail = ""
+        print(
+            f"[vibeisland] opencode permission reply http error {exc.code}: {detail}".strip(),
+            file=sys.stderr,
+        )
+        return False
+    except Exception as exc:
+        print(f"[vibeisland] opencode permission reply failed: {exc}", file=sys.stderr)
+        return False
+
+
+def complete_opencode_managed_reply(
+    *,
+    payload: dict[str, Any],
+    request: dict[str, Any],
+    decision: dict[str, Any],
+    socket_path: str,
+    title_hint: str,
+) -> int:
+    session_id = str(request.get("session_id") or "")
+    request_id = normalize_text(
+        first_present(
+            request.get("request_id"),
+            payload.get("request_id"),
+            payload.get("requestID"),
+            payload.get("requestId"),
+        )
+    )
+    action = str(decision.get("action") or "")
+    followup = truncate(str(decision.get("followup_text") or "").strip(), 240)
+    try:
+        if action == "allow_session":
+            apply_session_rule("opencode", session_id, request.get("rule") if isinstance(request.get("rule"), dict) else None)
+            publish_event(
+                managed_clear_event(
+                    source="opencode",
+                    payload=payload,
+                    title_hint=title_hint,
+                    summary="Approval granted and remembered for this session.",
+                ),
+                socket_path,
+                ignore_errors=True,
+            )
+            return opencode_managed_reply_output("always", request_id)
+
+        if action == "allow_once":
+            publish_event(
+                managed_clear_event(
+                    source="opencode",
+                    payload=payload,
+                    title_hint=title_hint,
+                    summary="Approval granted via Vibe Island.",
+                ),
+                socket_path,
+                ignore_errors=True,
+            )
+            return opencode_managed_reply_output("once", request_id)
+
+        if action == "deny":
+            reason = followup or str(decision.get("reason") or "").strip() or "Blocked by Vibe Island."
+            publish_event(
+                managed_clear_event(
+                    source="opencode",
+                    payload=payload,
+                    title_hint=title_hint,
+                    summary=truncate(f"Denied: {reason}", 140),
+                    state="failed",
+                    kind="failed",
+                ),
+                socket_path,
+                ignore_errors=True,
+            )
+            return opencode_managed_reply_output("reject", request_id, reason)
+
+        timeout_reason = str(decision.get("reason") or "Vibe Island approval timed out.")
+        publish_event(
+            managed_clear_event(
+                source="opencode",
+                payload=payload,
+                title_hint=title_hint,
+                summary=truncate(timeout_reason, 140),
+                state="failed",
+                kind="failed",
+                ),
+                socket_path,
+                ignore_errors=True,
+            )
+        return opencode_managed_reply_output("reject", request_id, timeout_reason)
+    except Exception as exc:
+        print(f"[vibeisland] opencode managed reply failed: {exc}", file=sys.stderr)
+        return opencode_managed_reply_output("reject", request_id, "Vibe Island failed to process the approval.")
+
+
 def maybe_complete_managed_approval(
     *,
     source: str,
@@ -1861,6 +2206,10 @@ def maybe_complete_managed_approval(
             )
             if source == "gemini":
                 return gemini_managed_output("allow")
+            if source == "cursor":
+                return cursor_managed_output("allow")
+            if source == "opencode":
+                return opencode_managed_output("allow")
             return 0
         if action == "allow_once":
             publish_event(
@@ -1875,6 +2224,10 @@ def maybe_complete_managed_approval(
             )
             if source == "gemini":
                 return gemini_managed_output("allow")
+            if source == "cursor":
+                return cursor_managed_output("allow")
+            if source == "opencode":
+                return opencode_managed_output("allow")
             return 0
 
         if action == "deny":
@@ -1893,6 +2246,10 @@ def maybe_complete_managed_approval(
             )
             if source == "gemini":
                 return gemini_managed_output("deny", reason)
+            if source == "cursor":
+                return cursor_managed_output("deny", reason)
+            if source == "opencode":
+                return opencode_managed_output("deny")
             return managed_deny_output(reason)
 
         timeout_reason = str(decision.get("reason") or "Vibe Island approval timed out.")
@@ -1910,6 +2267,10 @@ def maybe_complete_managed_approval(
         )
         if source == "gemini":
             return gemini_managed_output("deny", timeout_reason)
+        if source == "cursor":
+            return cursor_managed_output("deny", timeout_reason)
+        if source == "opencode":
+            return opencode_managed_output("deny")
         return managed_deny_output(timeout_reason)
     finally:
         clear_approval_request(source, session_id)
@@ -2768,6 +3129,331 @@ def event_from_gemini_hook(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def compact_preview_lines(lines: Iterable[str], limit: int = 6) -> list[str]:
+    compacted: list[str] = []
+    seen: set[str] = set()
+    for item in lines:
+        text = truncate(normalize_text(item), 140)
+        if not text or text in seen:
+            continue
+        compacted.append(text)
+        seen.add(text)
+    return compacted[-limit:]
+
+
+def cursor_preview_from_transcript(transcript_path: str | os.PathLike[str] | None) -> tuple[list[str], str, int]:
+    preview_lines: list[str] = []
+    latest_prompt = ""
+    token_total = 0
+    for item in read_recent_jsonl(transcript_path):
+        if not isinstance(item, dict):
+            continue
+        role = normalize_text(first_present(item.get("role"), item.get("author"), item.get("speaker"), item.get("type"))).lower()
+        content = normalize_text(
+            first_present(
+                item.get("text"),
+                item.get("message"),
+                item.get("summary"),
+                extract_message_text(item.get("content")),
+            )
+        )
+        if not content:
+            continue
+        if role.startswith("user"):
+            latest_prompt = latest_prompt or content
+            preview_lines.append(f"You: {content}")
+        elif any(token in role for token in ("assistant", "agent", "model", "cursor")):
+            preview_lines.append(f"Cursor: {content}")
+        else:
+            preview_lines.append(content)
+
+        context_window = item.get("context_window")
+        if isinstance(context_window, dict):
+            token_total = max(token_total, int(context_window.get("total_input_tokens") or 0))
+    return compact_preview_lines(preview_lines, limit=6), latest_prompt, token_total
+
+
+def cursor_statusline_path(session_id: str) -> Path:
+    return CURSOR_STATUSLINE_DIR / f"{safe_slug(session_id)}.json"
+
+
+def cursor_statusline_text(payload: dict[str, Any]) -> str:
+    model = normalize_text(((payload.get("model") or {}).get("display_name") if isinstance(payload.get("model"), dict) else None)) or "Cursor"
+    context_window = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
+    used_pct = context_window.get("used_percentage")
+    if isinstance(used_pct, (int, float)):
+        return f"[Cursor] {model} · ctx {int(round(float(used_pct)))}%"
+    return f"[Cursor] {model}"
+
+
+def cursor_shell_command(payload: dict[str, Any]) -> str:
+    args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+    return normalize_text(
+        first_present(
+            payload.get("command"),
+            args.get("command"),
+            payload.get("shellCommand"),
+            payload.get("rawCommand"),
+        )
+    )
+
+
+def event_from_cursor_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    hook_name = normalize_text(first_present(payload.get("hook_event_name"), payload.get("event"), payload.get("hook")))
+    session_id = normalize_text(first_present(payload.get("session_id"), payload.get("sessionId"), payload.get("conversation_id"), payload.get("conversationId")))
+    if not session_id:
+        session_id = f"cursor-{uuid.uuid4().hex[:8]}"
+    workspace_roots = payload.get("workspace_roots")
+    cwd = normalize_text(first_present(payload.get("cwd"), payload.get("workspace"), workspace_roots[0] if isinstance(workspace_roots, list) and workspace_roots else None, os.getcwd()))
+    jump = detect_jump_target()
+    command = cursor_shell_command(payload)
+    detail = first_present(command, payload.get("path"), payload.get("file"), payload.get("message"), payload.get("reason"), hook_name)
+    message_seed = first_present(payload.get("message"), payload.get("reason"), payload.get("description"), detail)
+    title_seed = first_present(payload.get("prompt"), payload.get("session_name"), detail, message_seed)
+
+    kind = "session_updated"
+    state = "running"
+    summary = truncate(normalize_text(message_seed or hook_name), 140) or hook_name
+    title = derive_title(title_seed, cwd)
+    task_label = derive_task_label(title_seed, cwd) or None
+    approval_type = None
+    question = None
+    choices: list[str] = []
+    review: dict[str, Any] = {}
+
+    if hook_name == "sessionStart":
+        kind = "session_started"
+        summary = "Cursor session started"
+        title = derive_title(first_present(payload.get("prompt"), payload.get("session_name"), payload.get("source"), "Cursor"), cwd)
+        task_label = derive_task_label(first_present(payload.get("prompt"), payload.get("session_name"), payload.get("source"), "Cursor"), cwd) or None
+    elif hook_name == "sessionEnd":
+        kind = "completed"
+        state = "completed"
+        summary = truncate(first_present(payload.get("message"), payload.get("reason"), "Cursor session ended"), 140)
+    elif hook_name == "beforeShellExecution":
+        summary = truncate(f"Bash: {command}" if command else "Cursor is preparing a shell command", 140)
+        title = derive_title(command or "Bash", cwd)
+        task_label = derive_task_label(command or "Bash", cwd) or None
+        if is_risky_command(command):
+            kind = "needs_approval"
+            state = "blocked"
+            approval_type, question, summary, choices = codex_approval_details(command)
+            review = build_review_info(
+                cwd=cwd,
+                command=command or None,
+                detail=first_present(payload.get("message"), payload.get("reason"), question, detail),
+                tool_name="Bash",
+                approval_type=approval_type,
+            )
+    elif hook_name == "afterShellExecution":
+        output = normalize_text(first_present(payload.get("output"), payload.get("result"), payload.get("message")))
+        summary = truncate(first_present(output, f"Completed: {command}" if command else "Cursor shell step completed"), 140)
+        title = derive_title(command or payload.get("session_name") or "Cursor", cwd)
+        task_label = derive_task_label(command or payload.get("session_name") or "Cursor", cwd) or None
+    elif hook_name in {"beforeMCPExecution", "afterMCPExecution"}:
+        tool_name = normalize_text(first_present(payload.get("tool"), payload.get("server"), payload.get("name"), "MCP"))
+        summary = truncate(first_present(payload.get("message"), payload.get("reason"), f"{tool_name} active"), 140)
+        title = derive_title(tool_name, cwd)
+        task_label = derive_task_label(tool_name, cwd) or None
+    elif hook_name == "subagentStart":
+        summary = truncate(first_present(payload.get("message"), payload.get("task"), "Cursor subagent started"), 140)
+        title = derive_title(first_present(payload.get("task"), payload.get("prompt"), payload.get("session_name"), "Cursor"), cwd)
+        task_label = derive_task_label(first_present(payload.get("task"), payload.get("prompt"), payload.get("session_name"), "Cursor"), cwd) or None
+    elif hook_name == "subagentStop":
+        kind = "completed"
+        state = "completed"
+        summary = truncate(first_present(payload.get("message"), payload.get("result"), "Cursor subagent finished"), 140)
+    elif hook_name == "stop":
+        kind = "completed"
+        state = "completed"
+        summary = truncate(first_present(payload.get("message"), payload.get("last_assistant_message"), "Cursor finished responding"), 140)
+
+    stable_label = stable_task_label_for_event(
+        "cursor",
+        session_id,
+        payload,
+        cwd,
+        payload.get("prompt"),
+        payload.get("session_name"),
+        payload.get("message"),
+    )
+    if stable_label:
+        task_label = stable_label
+        title = truncate(stable_label, 44)
+
+    return make_event(
+        source="cursor",
+        adapter="cursor-hook",
+        session_id=session_id,
+        run_id=normalize_text(first_present(payload.get("query_id"), payload.get("turn_id"))),
+        kind=kind,
+        state=state,
+        title=title,
+        task_label=task_label,
+        summary=summary,
+        approval_type=approval_type,
+        question=question,
+        choices=choices,
+        review=review,
+        workspace=cwd,
+        cwd=cwd,
+        terminal=jump["terminal"],
+        tty=jump["tty"],
+        pid=jump["pid"],
+        tmux_session=jump["tmux_session"],
+        tmux_window=jump["tmux_window"],
+        tmux_pane=jump["tmux_pane"],
+        raw=payload,
+    )
+
+
+def opencode_approval_details(permission_payload: dict[str, Any], cwd: str) -> tuple[str, str, str, list[str], dict[str, Any]]:
+    permission_name = normalize_text(
+        first_present(
+            permission_payload.get("type"),
+            permission_payload.get("permission"),
+        )
+    ) or "permission"
+    raw_pattern = permission_payload.get("pattern")
+    patterns = permission_payload.get("patterns") if isinstance(permission_payload.get("patterns"), list) else []
+    if isinstance(raw_pattern, str) and raw_pattern.strip():
+        patterns = [raw_pattern.strip(), *patterns]
+    elif isinstance(raw_pattern, list):
+        patterns = [str(item).strip() for item in raw_pattern if str(item).strip()] + patterns
+    metadata = permission_payload.get("metadata") if isinstance(permission_payload.get("metadata"), dict) else {}
+    command = normalize_text(
+        first_present(
+            *patterns,
+            metadata.get("command"),
+            metadata.get("title"),
+            metadata.get("detail"),
+            permission_payload.get("title"),
+        )
+    )
+    question = truncate(
+        first_present(
+            metadata.get("question"),
+            metadata.get("title"),
+            permission_payload.get("title"),
+            permission_payload.get("question"),
+            f"OpenCode needs your permission to use {permission_name}",
+        ),
+        140,
+    ) or f"OpenCode needs your permission to use {permission_name}"
+    summary = truncate(
+        f"{permission_name} wants approval: {command}" if command else question,
+        140,
+    )
+    review = build_review_info(
+        cwd=cwd,
+        command=command or None,
+        detail=first_present(metadata.get("detail"), metadata.get("title"), question, summary),
+        tool_name=permission_name,
+        approval_type=permission_name.lower(),
+    )
+    return permission_name.lower(), question, summary, ["Allow once", "Always allow", "Deny"], review
+
+
+def event_from_opencode_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    event_type = normalize_text(event.get("type"))
+    properties = event.get("properties") if isinstance(event.get("properties"), dict) else {}
+    cwd = normalize_text(first_present(payload.get("directory"), payload.get("worktree"), (payload.get("project") or {}).get("worktree") if isinstance(payload.get("project"), dict) else None, os.getcwd()))
+    session_id = normalize_text(first_present(properties.get("sessionID"), properties.get("id"), properties.get("sessionId")))
+    if not session_id:
+        session_id = f"opencode-{uuid.uuid4().hex[:8]}"
+    jump = detect_jump_target()
+
+    kind = "session_updated"
+    state = "running"
+    summary = truncate(first_present(properties.get("message"), properties.get("title"), event_type or "OpenCode update"), 140) or "OpenCode update"
+    title = derive_title(first_present(properties.get("title"), properties.get("message"), payload.get("directory"), "OpenCode"), cwd)
+    task_label = derive_task_label(first_present(properties.get("title"), properties.get("message"), payload.get("directory"), "OpenCode"), cwd) or None
+    approval_type = None
+    question = None
+    choices: list[str] = []
+    review: dict[str, Any] = {}
+
+    if event_type == "permission.asked":
+        approval_type, question, summary, choices, review = opencode_approval_details(properties, cwd)
+        kind = "needs_approval"
+        state = "blocked"
+        metadata = properties.get("metadata") if isinstance(properties.get("metadata"), dict) else {}
+        title = derive_title(first_present(metadata.get("title"), metadata.get("command"), question, summary), cwd)
+        task_label = derive_task_label(first_present(question, summary, title), cwd) or None
+    elif event_type == "permission.replied":
+        reply = normalize_text(properties.get("reply")) or "allow"
+        kind = "session_updated"
+        state = "running"
+        summary = truncate(f"Permission reply recorded: {reply}", 140)
+    elif event_type == "question.asked":
+        question_info = properties.get("questions")[0] if isinstance(properties.get("questions"), list) and properties.get("questions") else {}
+        question = normalize_text(first_present(question_info.get("question"), question_info.get("header"), "OpenCode needs your input"))
+        choices = [
+            normalize_text(option.get("label"))
+            for option in (question_info.get("options") if isinstance(question_info, dict) and isinstance(question_info.get("options"), list) else [])
+            if normalize_text(option.get("label"))
+        ]
+        kind = "ask_user"
+        state = "waiting_user"
+        summary = truncate(question, 140)
+        title = derive_title(question, cwd)
+        task_label = derive_task_label(question, cwd) or None
+    elif event_type == "question.replied":
+        kind = "session_updated"
+        state = "running"
+        summary = "OpenCode question answered"
+    elif event_type == "session.status":
+        status = properties.get("status") if isinstance(properties.get("status"), dict) else {}
+        status_type = normalize_text(status.get("type")) or "busy"
+        summary = truncate(f"OpenCode is {status_type}", 140)
+        state = "running"
+    elif event_type == "session.idle":
+        kind = "completed"
+        state = "completed"
+        summary = "OpenCode is waiting for your input"
+    elif event_type == "message.updated":
+        summary = truncate(first_present(properties.get("text"), properties.get("message"), "OpenCode updated"), 140)
+
+    stable_label = stable_task_label_for_event(
+        "opencode",
+        session_id,
+        payload,
+        cwd,
+        properties.get("title"),
+        properties.get("message"),
+        summary,
+    )
+    if stable_label:
+        task_label = stable_label
+        title = truncate(stable_label, 44)
+
+    return make_event(
+        source="opencode",
+        adapter="opencode-hook",
+        session_id=session_id,
+        run_id=normalize_text(first_present(properties.get("requestID"), properties.get("requestId"), properties.get("callID"), properties.get("callId"))),
+        kind=kind,
+        state=state,
+        title=title,
+        task_label=task_label,
+        summary=summary,
+        approval_type=approval_type,
+        question=question,
+        choices=choices,
+        review=review,
+        workspace=cwd,
+        cwd=cwd,
+        terminal=jump["terminal"],
+        tty=jump["tty"],
+        pid=jump["pid"],
+        tmux_session=jump["tmux_session"],
+        tmux_window=jump["tmux_window"],
+        tmux_pane=jump["tmux_pane"],
+        raw=payload,
+    )
+
+
 def choose_jump_target(payload: dict[str, Any]) -> dict[str, Any] | None:
     if "jump_target" in payload and isinstance(payload["jump_target"], dict):
         return payload["jump_target"]
@@ -2977,12 +3663,19 @@ def classify_live_agent(argv: list[str]) -> str | None:
 
     lowered = [arg.lower() for arg in argv]
     if any(
-        "vibeisland.py" in arg or "claude-hook" in arg or "codex-hook" in arg or "codex-notify" in arg
+        "vibeisland.py" in arg
+        or "claude-hook" in arg
+        or "codex-hook" in arg
+        or "codex-notify" in arg
+        or "gemini-hook" in arg
+        or "cursor-hook" in arg
+        or "cursor-statusline" in arg
+        or "opencode-hook" in arg
         for arg in lowered
     ):
         return None
 
-    for source in ("claude", "codex", "gemini"):
+    for source in ("claude", "codex", "gemini", "cursor", "opencode"):
         for index, token in enumerate(lowered):
             token_name = Path(token).name
             matches_source = token_name == source
@@ -2993,6 +3686,10 @@ def classify_live_agent(argv: list[str]) -> str | None:
                     or "@google/gemini-cli" in token
                     or token.endswith("/gemini.js")
                 )
+            elif source == "cursor":
+                matches_source = token_name == "cursor-agent" or token_name == "cursor"
+            elif source == "opencode":
+                matches_source = token_name == "opencode" or "@opencode-ai" in token
             if not matches_source:
                 continue
             next_token = lowered[index + 1] if index + 1 < len(lowered) else ""
@@ -4049,6 +4746,409 @@ def build_gemini_hooks() -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def build_cursor_statusline() -> dict[str, Any]:
+    return {
+        "type": "command",
+        "command": bridge_command_string("cursor-statusline"),
+        "padding": 1,
+        "updateIntervalMs": 500,
+        "timeoutMs": 1200,
+    }
+
+
+def build_cursor_hooks() -> dict[str, list[dict[str, Any]]]:
+    command = bridge_command_string("cursor-hook")
+
+    def entry(event_name: str, description: str) -> dict[str, Any]:
+        return {
+            "command": command,
+            "event": event_name,
+            "description": description,
+        }
+
+    return {
+        "sessionStart": [entry("sessionStart", "Bridge Cursor session start into Vibe Island")],
+        "sessionEnd": [entry("sessionEnd", "Bridge Cursor session end into Vibe Island")],
+        "beforeShellExecution": [entry("beforeShellExecution", "Route Cursor shell approvals through Vibe Island")],
+        "afterShellExecution": [entry("afterShellExecution", "Bridge Cursor shell results into Vibe Island")],
+        "beforeMCPExecution": [entry("beforeMCPExecution", "Bridge Cursor MCP start into Vibe Island")],
+        "afterMCPExecution": [entry("afterMCPExecution", "Bridge Cursor MCP result into Vibe Island")],
+        "subagentStart": [entry("subagentStart", "Bridge Cursor subagent start into Vibe Island")],
+        "subagentStop": [entry("subagentStop", "Bridge Cursor subagent stop into Vibe Island")],
+        "stop": [entry("stop", "Bridge Cursor stop into Vibe Island")],
+    }
+
+
+def cursor_hook_contains_marker(entry: Any, marker: str) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    command = normalize_text(entry.get("command"))
+    return bool(command and marker in command and BRIDGE_SCRIPT.name in command)
+
+
+def merge_cursor_hook_entries(
+    existing_entries: Any,
+    generated_entries: list[dict[str, Any]],
+    marker: str,
+) -> list[dict[str, Any]]:
+    existing = existing_entries if isinstance(existing_entries, list) else []
+    filtered = [entry for entry in existing if not cursor_hook_contains_marker(entry, marker)]
+    filtered.extend(generated_entries)
+    return filtered
+
+
+def build_opencode_plugin_module() -> str:
+    return textwrap.dedent(
+        f"""\
+        import {{ appendFileSync }} from "node:fs";
+        import {{ execFileSync }} from "node:child_process";
+
+        const PYTHON_BIN = {json.dumps(sys.executable)};
+        const BRIDGE_SCRIPT = {json.dumps(str(BRIDGE_SCRIPT))};
+        const DEBUG_LOG = "/tmp/vibeisland_opencode_plugin_debug.jsonl";
+
+        function writeDebug(entry) {{
+          try {{
+            appendFileSync(DEBUG_LOG, JSON.stringify({{
+              ts: new Date().toISOString(),
+              ...entry,
+            }}) + "\\n");
+          }} catch (_error) {{
+            // best effort only
+          }}
+        }}
+
+        function runBridge(subcommand, payload, extraArgs = []) {{
+          const args = [BRIDGE_SCRIPT, subcommand, ...extraArgs];
+          const stdout = execFileSync(PYTHON_BIN, args, {{
+            input: JSON.stringify(payload ?? {{}}),
+            encoding: "utf8",
+            cwd: payload?.directory || process.cwd(),
+            stdio: ["pipe", "pipe", "pipe"],
+          }});
+          return String(stdout || "").trim();
+        }}
+
+        function permissionRequestID(value) {{
+          if (!value || typeof value !== "object") {{
+            return "";
+          }}
+          return String(value.id || value.requestID || value.requestId || "").trim();
+        }}
+
+        function parsePermissionStatus(raw) {{
+          if (!raw) {{
+            return "ask";
+          }}
+          try {{
+            const parsed = JSON.parse(raw);
+            const status = String(parsed?.status || "").trim();
+            if (status === "allow" || status === "deny" || status === "ask") {{
+              return status;
+            }}
+          }} catch (_error) {{
+            // ignore invalid bridge payloads and fall back to ask
+          }}
+          return "ask";
+        }}
+
+        function parseManagedReply(raw) {{
+          if (!raw) {{
+            return null;
+          }}
+          try {{
+            const parsed = JSON.parse(raw);
+            const requestID = String(parsed?.requestID || "").trim();
+            const reply = String(parsed?.reply || "").trim();
+            const message = String(parsed?.message || "").trim();
+            if (!requestID || !reply) {{
+              return null;
+            }}
+            return {{
+              requestID,
+              reply,
+              message,
+            }};
+          }} catch (_error) {{
+            return null;
+          }}
+        }}
+
+        async function replyToPermissionAPI(fetchImpl, baseUrl, serverPort, managedReply, context) {{
+          if (!fetchImpl || !managedReply?.requestID || !managedReply?.reply) {{
+            return {{ ok: false, status: 0, body: "", url: "" }};
+          }}
+          const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\\/$/, "");
+          const requestBaseUrl = normalizedBaseUrl || `http://localhost:${{serverPort || 4096}}`;
+          const url = new URL(`${{requestBaseUrl}}/permission/${{encodeURIComponent(managedReply.requestID)}}/reply`);
+          const body = {{
+            reply: managedReply.reply,
+          }};
+          if (managedReply.message) {{
+            body.message = managedReply.message;
+          }}
+          const response = await fetchImpl(new Request(url, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify(body),
+          }}));
+          let responseBody = "";
+          try {{
+            responseBody = await response.text();
+          }} catch (_error) {{
+            responseBody = "";
+          }}
+          return {{
+            ok: Boolean(response.ok),
+            status: Number(response.status || 0),
+            body: responseBody,
+            url: String(url),
+          }};
+        }}
+
+        export default async (input) => {{
+          const rawServerUrl = input?.serverUrl ?? null;
+          const clientConfig = input?.client?._client?.getConfig?.() || null;
+          const configBaseUrl = clientConfig?.baseUrl ? String(clientConfig.baseUrl) : "";
+          let serverPort = rawServerUrl?.port ? parseInt(rawServerUrl.port, 10) || 4096 : 4096;
+          if ((!serverPort || serverPort === 4096) && configBaseUrl) {{
+            try {{
+              const parsedConfigUrl = new URL(configBaseUrl);
+              serverPort = parseInt(parsedConfigUrl.port, 10) || serverPort;
+            }} catch (_error) {{
+              // ignore malformed base URL
+            }}
+          }}
+          const internalFetch = clientConfig?.fetch || null;
+          writeDebug({{
+            kind: "plugin.init",
+            directory: input.directory,
+            worktree: input.worktree,
+            serverUrl: rawServerUrl ? String(rawServerUrl) : "",
+            configBaseUrl,
+            serverPort,
+            hasInternalFetch: Boolean(internalFetch),
+          }});
+          const context = {{
+            directory: input.directory,
+            worktree: input.worktree,
+            project: input.project,
+            serverUrl: rawServerUrl ? String(rawServerUrl) : "",
+            configBaseUrl,
+            serverPort,
+          }};
+          return {{
+            event: async ({{ event }}) => {{
+              try {{
+                const eventType = event?.type ?? null;
+                const requestID = permissionRequestID(event?.properties);
+                writeDebug({{
+                  kind: "event",
+                  eventType,
+                  properties: event?.properties ?? null,
+                }});
+                if (eventType === "permission.asked") {{
+                  const raw = runBridge("opencode-hook", {{ ...context, event }}, ["--permission-reply"]);
+                  const managedReply = parseManagedReply(raw);
+                  let delivered = false;
+                  let deliveryError = "";
+                  let deliveryStatus = 0;
+                  let deliveryBody = "";
+                  let deliveryUrl = "";
+                  if (managedReply) {{
+                    try {{
+                      const delivery = await replyToPermissionAPI(
+                        internalFetch,
+                        context.configBaseUrl || context.serverUrl,
+                        context.serverPort,
+                        managedReply,
+                        context,
+                      );
+                      delivered = Boolean(delivery?.ok);
+                      deliveryStatus = Number(delivery?.status || 0);
+                      deliveryBody = String(delivery?.body || "");
+                      deliveryUrl = String(delivery?.url || "");
+                    }} catch (error) {{
+                      delivered = false;
+                      deliveryError = String(error?.message || error || "");
+                    }}
+                  }}
+                  writeDebug({{
+                    kind: "permission.asked.bridge",
+                    requestID,
+                    raw,
+                    delivered,
+                    deliveryError,
+                    deliveryStatus,
+                    deliveryBody,
+                    deliveryUrl,
+                    usedInternalFetch: Boolean(internalFetch),
+                    configBaseUrl: context.configBaseUrl || "",
+                    serverPort: context.serverPort,
+                  }});
+                  return;
+                }}
+                runBridge("opencode-hook", {{ ...context, event }});
+              }} catch (error) {{
+                writeDebug({{
+                  kind: "event.error",
+                  message: String(error?.message || error || ""),
+                }});
+                // Keep the main OpenCode flow running even if observability fails.
+              }}
+            }},
+            "permission.ask": async (permission, output) => {{
+              try {{
+                const requestID = permissionRequestID(permission);
+                const raw = runBridge("opencode-hook", {{ ...context, permission }}, ["--permission-ask"]);
+                const status = parsePermissionStatus(raw);
+                writeDebug({{
+                  kind: "permission.ask",
+                  requestID,
+                  permission,
+                  raw,
+                  status,
+                }});
+                output.status = status;
+              }} catch (error) {{
+                writeDebug({{
+                  kind: "permission.ask.error",
+                  message: String(error?.message || error || ""),
+                }});
+                output.status = "ask";
+              }}
+            }},
+          }};
+        }};
+        """
+    )
+
+
+def build_opencode_plugin_package_json() -> str:
+    return json.dumps(
+        {
+            "name": OPENCODE_PLUGIN_NAME,
+            "version": "0.1.0-beta.1",
+            "type": "module",
+            "main": "index.mjs",
+        },
+        indent=2,
+        ensure_ascii=False,
+    ) + "\n"
+
+
+def install_cursor_hooks(
+    config_path: Path,
+    hooks_path: Path,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    data = read_json_file(config_path, {})
+    hooks_data = read_json_file(hooks_path, {})
+    hooks = hooks_data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+
+    for event_name, entries in build_cursor_hooks().items():
+        hooks[event_name] = merge_cursor_hook_entries(hooks.get(event_name), entries, "cursor-hook")
+
+    hooks_data["hooks"] = hooks
+    data["statusLine"] = build_cursor_statusline()
+    data["approvalMode"] = "default"
+
+    config_rendered = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    hooks_rendered = json.dumps(hooks_data, indent=2, ensure_ascii=False) + "\n"
+
+    config_backup = None
+    hooks_backup = None
+    if not dry_run:
+        config_backup = backup_file(config_path)
+        hooks_backup = backup_file(hooks_path)
+        atomic_write_text(config_path, config_rendered)
+        atomic_write_text(hooks_path, hooks_rendered)
+
+    return {
+        "config_path": str(config_path),
+        "hooks_path": str(hooks_path),
+        "config_backup": str(config_backup) if config_backup else None,
+        "hooks_backup": str(hooks_backup) if hooks_backup else None,
+        "events": sorted(build_cursor_hooks().keys()),
+        "status_line": build_cursor_statusline(),
+        "approval_mode": "default",
+        "dry_run": dry_run,
+    }
+
+
+def install_opencode_hooks(config_path: Path, dry_run: bool = False) -> dict[str, Any]:
+    data = read_json_file(config_path, {})
+    plugins = data.get("plugin")
+    plugin_entries = plugins if isinstance(plugins, list) else []
+    filtered_plugins: list[Any] = []
+    for entry in plugin_entries:
+        if isinstance(entry, str):
+            if normalize_text(entry) in {normalize_text(item) for item in OPENCODE_PLUGIN_LEGACY_ENTRIES}:
+                continue
+            filtered_plugins.append(entry)
+            continue
+        if isinstance(entry, list) and entry:
+            if normalize_text(entry[0]) in {normalize_text(item) for item in OPENCODE_PLUGIN_LEGACY_ENTRIES}:
+                continue
+            normalized = list(entry)
+            filtered_plugins.append(normalized)
+            continue
+        filtered_plugins.append(entry)
+    filtered_plugins.append(f"./plugins/{OPENCODE_PLUGIN_NAME}")
+    data["plugin"] = filtered_plugins
+    rendered = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    sibling_config_path = OPENCODE_ALT_CONFIG_PATH if config_path == OPENCODE_CONFIG_PATH else None
+
+    config_backup = None
+    sibling_backup = None
+    module_backup = None
+    package_backup = None
+    node_module_backup = None
+    legacy_file_backup = None
+    if not dry_run:
+        config_backup = backup_file(config_path)
+        if sibling_config_path:
+            sibling_backup = backup_file(sibling_config_path)
+        OPENCODE_PLUGIN_SOURCE_DIR.mkdir(parents=True, exist_ok=True)
+        OPENCODE_PLUGIN_PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+        OPENCODE_PLUGIN_NODEMODULE_DIR.mkdir(parents=True, exist_ok=True)
+        legacy_file_backup = backup_file(OPENCODE_PLUGIN_FILE)
+        package_backup = backup_file(OPENCODE_PLUGIN_PACKAGE_FILE)
+        node_module_backup = backup_file(OPENCODE_PLUGIN_NODEMODULE_FILE)
+        atomic_write_text(config_path, rendered)
+        if sibling_config_path:
+            atomic_write_text(sibling_config_path, rendered)
+        module_text = build_opencode_plugin_module()
+        package_json = build_opencode_plugin_package_json()
+        atomic_write_text(OPENCODE_PLUGIN_PACKAGE_FILE, module_text)
+        atomic_write_text(OPENCODE_PLUGIN_PACKAGE_DIR / "package.json", package_json)
+        atomic_write_text(OPENCODE_PLUGIN_NODEMODULE_FILE, module_text)
+        atomic_write_text(OPENCODE_PLUGIN_NODEMODULE_DIR / "package.json", package_json)
+        try:
+            OPENCODE_PLUGIN_FILE.unlink()
+        except FileNotFoundError:
+            pass
+
+    return {
+        "config_path": str(config_path),
+        "backup": str(config_backup) if config_backup else None,
+        "sibling_config_path": str(sibling_config_path) if sibling_config_path else None,
+        "sibling_backup": str(sibling_backup) if sibling_backup else None,
+        "config_root": str(OPENCODE_CONFIG_ROOT),
+        "plugin_dir": str(OPENCODE_PLUGIN_PACKAGE_DIR),
+        "plugin_source_dir": str(OPENCODE_PLUGIN_SOURCE_DIR),
+        "module_backup": str(module_backup) if module_backup else None,
+        "legacy_file_backup": str(legacy_file_backup) if legacy_file_backup else None,
+        "package_backup": str(package_backup) if package_backup else None,
+        "node_module_backup": str(node_module_backup) if node_module_backup else None,
+        "plugin_file": str(OPENCODE_PLUGIN_FILE),
+        "plugin": OPENCODE_PLUGIN_NAME,
+        "dry_run": dry_run,
+    }
+
+
 def group_contains_marker(group: dict[str, Any], marker: str) -> bool:
     hooks = group.get("hooks")
     if not isinstance(hooks, list):
@@ -4720,6 +5820,21 @@ def resolve_managed_approval_request(
     request["decision"] = resolution
     request["updated_at"] = now_iso()
     write_managed_approval_request(request)
+
+    if source == "opencode":
+        reply = "once"
+        if action == "allow_session":
+            reply = "always"
+        elif action == "deny":
+            reply = "reject"
+        request["delivery"] = {
+            "mode": "opencode-hook-wait",
+            "reply": reply,
+            "sent_at": now_iso(),
+            "ok": True,
+        }
+        write_managed_approval_request(request)
+
     emit_optimistic_response_event()
     print(f"Resolved managed approval for {source}:{session_id} -> {action}", flush=True)
     return True
@@ -5209,6 +6324,211 @@ def maybe_handle_managed_gemini_pretool(payload: dict[str, Any], socket_path: st
     )
 
 
+def maybe_handle_managed_cursor_pretool(payload: dict[str, Any], socket_path: str) -> int | None:
+    hook_name = normalize_text(first_present(payload.get("hook_event_name"), payload.get("event"), payload.get("hook")))
+    if hook_name != "beforeShellExecution":
+        return None
+
+    source = "cursor"
+    session_id = str(
+        first_present(
+            payload.get("session_id"),
+            payload.get("sessionId"),
+            payload.get("conversation_id"),
+            payload.get("conversationId"),
+        )
+        or ""
+    )
+    if not session_id:
+        return None
+
+    command = normalize_text(cursor_shell_command(payload))
+    if not is_risky_command(command):
+        return None
+
+    tool_input = {"command": command} if command else {}
+    managed_payload = dict(payload)
+    managed_payload["session_id"] = session_id
+    managed_payload["tool_name"] = "Bash"
+    managed_payload["tool_input"] = tool_input
+
+    title_hint = command or "Bash"
+    if has_matching_session_rule(source, session_id, managed_payload):
+        publish_event(
+            managed_clear_event(
+                source=source,
+                payload=managed_payload,
+                title_hint=title_hint,
+                summary="Auto-approved via Vibe Island session rule.",
+            ),
+            socket_path,
+            ignore_errors=True,
+        )
+        return cursor_managed_output("allow")
+
+    approval_type, question, summary, choices = codex_approval_details(command)
+    blocked_event = event_from_cursor_hook(payload)
+    if isinstance(blocked_event.get("raw"), dict):
+        blocked_event["raw"]["managed_approval"] = True
+    request = build_managed_approval_request(
+        source=source,
+        payload=managed_payload,
+        approval_type=approval_type,
+        question=question,
+        summary=summary,
+        choices=choices,
+    )
+    blocked_session = blocked_event.get("session") or {}
+    blocked_title = normalize_text(blocked_session.get("title"))
+    blocked_task_label = normalize_text(blocked_session.get("task_label"))
+    if blocked_title:
+        request["title"] = blocked_title
+    if blocked_task_label and not is_low_signal_task_label(blocked_task_label):
+        request["task_label"] = blocked_task_label
+    request["jump_target"] = blocked_event.get("jump_target") or {}
+    request["ui_session_id"] = str(blocked_event.get("session", {}).get("id") or request.get("session_id") or "")
+    write_managed_approval_request(request)
+    decision = wait_for_managed_approval(request, blocked_event, socket_path)
+    return maybe_complete_managed_approval(
+        source=source,
+        payload=managed_payload,
+        request=request,
+        decision=decision,
+        socket_path=socket_path,
+        title_hint=title_hint,
+    )
+
+
+def maybe_handle_managed_opencode_permission(
+    payload: dict[str, Any],
+    socket_path: str,
+    *,
+    output_mode: str = "status",
+) -> int | None:
+    permission_payload = payload.get("permission") if isinstance(payload.get("permission"), dict) else {}
+    if not permission_payload:
+        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+        event_properties = event.get("properties") if isinstance(event.get("properties"), dict) else {}
+        if normalize_text(event.get("type")) == "permission.asked" and isinstance(event_properties, dict):
+            permission_payload = event_properties
+    if not permission_payload:
+        return None
+
+    source = "opencode"
+    session_id = normalize_text(
+        first_present(permission_payload.get("sessionID"), permission_payload.get("sessionId"), permission_payload.get("id"))
+    )
+    if not session_id:
+        return None
+
+    cwd = normalize_text(first_present(payload.get("directory"), payload.get("worktree"), os.getcwd()))
+    server_url = normalize_text(first_present(payload.get("serverUrl"), payload.get("server_url")))
+    raw_pattern = permission_payload.get("pattern")
+    patterns = permission_payload.get("patterns") if isinstance(permission_payload.get("patterns"), list) else []
+    if isinstance(raw_pattern, str) and raw_pattern.strip():
+        patterns = [raw_pattern.strip(), *patterns]
+    elif isinstance(raw_pattern, list):
+        patterns = [str(item).strip() for item in raw_pattern if str(item).strip()] + patterns
+    metadata = permission_payload.get("metadata") if isinstance(permission_payload.get("metadata"), dict) else {}
+    command = normalize_text(
+        first_present(
+            *patterns,
+            metadata.get("command"),
+            metadata.get("title"),
+            metadata.get("detail"),
+            permission_payload.get("title"),
+        )
+    )
+    permission_name = normalize_text(first_present(permission_payload.get("type"), permission_payload.get("permission"))) or "permission"
+    managed_payload = {
+        "session_id": session_id,
+        "cwd": cwd,
+        "server_url": server_url,
+        "permission": permission_payload,
+        "patterns": patterns,
+        "request_id": normalize_text(first_present(permission_payload.get("id"), permission_payload.get("requestID"), permission_payload.get("requestId"))),
+        "tool_name": permission_name,
+        "tool_input": {"command": command} if command else {},
+        "directory": cwd,
+        "worktree": normalize_text(first_present(payload.get("worktree"), cwd)),
+    }
+
+    if has_matching_session_rule(source, session_id, managed_payload):
+        publish_event(
+            managed_clear_event(
+                source=source,
+                payload=managed_payload,
+                title_hint=command or permission_name,
+                summary="Auto-approved via Vibe Island session rule.",
+            ),
+            socket_path,
+            ignore_errors=True,
+        )
+        if output_mode == "reply":
+            request_id = normalize_text(
+                first_present(
+                    permission_payload.get("id"),
+                    permission_payload.get("requestID"),
+                    permission_payload.get("requestId"),
+                )
+            )
+            return opencode_managed_reply_output("always", request_id)
+        return opencode_managed_output("allow")
+
+    approval_type, question, summary, choices, review = opencode_approval_details(permission_payload, cwd)
+    blocked_event = event_from_opencode_hook(
+        {
+            "directory": cwd,
+            "worktree": normalize_text(first_present(payload.get("worktree"), cwd)),
+            "event": {"type": "permission.asked", "properties": permission_payload},
+        }
+    )
+    if isinstance(blocked_event.get("raw"), dict):
+        blocked_event["raw"]["managed_approval"] = True
+    request = build_managed_approval_request(
+        source=source,
+        payload=managed_payload,
+        approval_type=approval_type,
+        question=question,
+        summary=summary,
+        choices=choices,
+    )
+    blocked_session = blocked_event.get("session") or {}
+    blocked_title = normalize_text(blocked_session.get("title"))
+    blocked_task_label = normalize_text(blocked_session.get("task_label"))
+    if blocked_title:
+        request["title"] = blocked_title
+    if blocked_task_label and not is_low_signal_task_label(blocked_task_label):
+        request["task_label"] = blocked_task_label
+    request["review"] = review
+    request["jump_target"] = blocked_event.get("jump_target") or {}
+    request["ui_session_id"] = str(blocked_event.get("session", {}).get("id") or request.get("session_id") or "")
+    request["server_url"] = server_url
+    request["directory"] = cwd
+    request["worktree"] = normalize_text(first_present(payload.get("worktree"), cwd))
+    write_managed_approval_request(request)
+    if output_mode == "enqueue":
+        publish_event(blocked_event, socket_path, ignore_errors=True)
+        return 0
+    decision = wait_for_managed_approval(request, blocked_event, socket_path)
+    if output_mode == "reply":
+        return complete_opencode_managed_reply(
+            payload=managed_payload,
+            request=request,
+            decision=decision,
+            socket_path=socket_path,
+            title_hint=command or question or permission_name,
+        )
+    return maybe_complete_managed_approval(
+        source=source,
+        payload=managed_payload,
+        request=request,
+        decision=decision,
+        socket_path=socket_path,
+        title_hint=command or question or permission_name,
+    )
+
+
 def _percent_int(value: Any) -> int | None:
     if value is None:
         return None
@@ -5387,6 +6707,105 @@ def cmd_gemini_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cursor_statusline(args: argparse.Namespace) -> int:
+    try:
+        payload = read_payload_from_input(args.payload)
+        if not isinstance(payload, dict):
+            payload = {}
+        maybe_log_hook_payload("cursor-statusline", payload)
+        session_id = normalize_text(
+            first_present(
+                payload.get("session_id"),
+                payload.get("sessionId"),
+                payload.get("conversation_id"),
+                payload.get("conversationId"),
+            )
+        )
+        if not session_id:
+            session_id = f"cursor-{uuid.uuid4().hex[:8]}"
+        transcript_path = normalize_text(first_present(payload.get("transcript_path"), payload.get("transcriptPath")))
+        preview_lines, latest_prompt, tokens_total = cursor_preview_from_transcript(transcript_path)
+        context_window = payload.get("context_window") if isinstance(payload.get("context_window"), dict) else {}
+        snapshot = {
+            "captured_at": now_iso(),
+            "session_id": session_id,
+            "session_name": normalize_text(first_present(payload.get("session_name"), payload.get("sessionName"))),
+            "cwd": normalize_text(first_present(payload.get("cwd"), payload.get("workspace"), os.getcwd())),
+            "transcript_path": transcript_path,
+            "preview_lines": preview_lines,
+            "last_user_prompt": latest_prompt,
+            "runtime_pid": os.getppid(),
+            "context_window": context_window,
+            "tokens_total": int(tokens_total or 0),
+        }
+        write_json_file(cursor_statusline_path(session_id), snapshot)
+        print(cursor_statusline_text(payload), flush=True)
+    except Exception as exc:
+        print(f"[vibeisland] cursor-statusline error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_cursor_hook(args: argparse.Namespace) -> int:
+    try:
+        payload = read_payload_from_input(args.payload)
+        if not isinstance(payload, dict):
+            payload = {"message": str(payload)}
+        maybe_log_hook_payload("cursor-hook", payload)
+        if args.print_event:
+            event = event_from_cursor_hook(payload)
+            print(json.dumps(event, ensure_ascii=False, indent=2))
+            return 0
+        managed = maybe_handle_managed_cursor_pretool(payload, args.socket)
+        if managed is not None:
+            return managed
+        event = event_from_cursor_hook(payload)
+        publish_event(event, args.socket, ignore_errors=True)
+    except Exception as exc:
+        print(f"[vibeisland] cursor-hook error: {exc}", file=sys.stderr)
+    return 0
+
+
+def cmd_opencode_hook(args: argparse.Namespace) -> int:
+    try:
+        payload = read_payload_from_input(args.payload)
+        if not isinstance(payload, dict):
+            payload = {"message": str(payload)}
+        maybe_log_hook_payload("opencode-hook", payload)
+        if args.permission_reply:
+            managed = maybe_handle_managed_opencode_permission(payload, args.socket, output_mode="reply")
+            if managed is not None:
+                return managed
+            print(json.dumps({}), flush=True)
+            return 0
+        if args.permission_ask:
+            managed = maybe_handle_managed_opencode_permission(payload, args.socket)
+            if managed is not None:
+                return managed
+            print(json.dumps({"status": "ask"}), flush=True)
+            return 0
+        if args.permission_event:
+            managed = maybe_handle_managed_opencode_permission(payload, args.socket, output_mode="enqueue")
+            if managed is not None:
+                print(json.dumps({"status": "queued"}), flush=True)
+                return managed
+        if args.print_event:
+            event = event_from_opencode_hook(payload)
+            print(json.dumps(event, ensure_ascii=False, indent=2))
+            return 0
+        event = event_from_opencode_hook(payload)
+        publish_event(event, args.socket, ignore_errors=True)
+    except Exception as exc:
+        print(f"[vibeisland] opencode-hook error: {exc}", file=sys.stderr)
+        if args.permission_reply:
+            print(json.dumps({}), flush=True)
+            return 0
+        if args.permission_ask:
+            print(json.dumps({"status": "ask"}), flush=True)
+            return 0
+    return 0
+
+
 def cmd_codex_notify(args: argparse.Namespace) -> int:
     try:
         payload = read_payload_from_input(args.payload)
@@ -5417,6 +6836,16 @@ def cmd_install(args: argparse.Namespace) -> int:
     if args.target in {"gemini", "all"}:
         results["gemini"] = install_gemini_hooks(Path(args.gemini_settings), args.dry_run)
 
+    if args.target in {"cursor", "all"}:
+        results["cursor"] = install_cursor_hooks(
+            Path(args.cursor_config),
+            Path(args.cursor_hooks),
+            args.dry_run,
+        )
+
+    if args.target in {"opencode", "all"}:
+        results["opencode"] = install_opencode_hooks(Path(args.opencode_config), args.dry_run)
+
     print(json.dumps(results, ensure_ascii=False, indent=2), flush=True)
     return 0
 
@@ -5431,6 +6860,10 @@ def launcher_status(socket_path: str = DEFAULT_SOCKET) -> dict[str, Any]:
     shell_pid = int(shell.get("pid") or 0) or None
     daemon_running = process_alive(daemon_pid)
     shell_running = process_alive(shell_pid)
+    shell_matches = matching_shell_pids(socket_path)
+    if shell_matches and (shell_pid not in shell_matches):
+        shell_pid = shell_matches[0]
+        shell_running = True
     daemon_status = "running" if socket_live else ("stale" if daemon_running else "stopped")
     if socket_live and not daemon_running:
         daemon_status = "external"
@@ -5530,6 +6963,9 @@ def cmd_launch(args: argparse.Namespace) -> int:
 
     shell_started = False
     shell_pid = int(shell.get("pid") or 0) or None
+    existing_shells = matching_shell_pids(args.socket)
+    if existing_shells:
+        shell_pid = existing_shells[0]
     if not process_alive(shell_pid):
         shell_command = build_shell_command(args.socket)
         shell_log = str(log_path("shell"))
@@ -5578,11 +7014,29 @@ def _stop_entry(entry: dict[str, Any] | None) -> bool:
     return True
 
 
+def _stop_shells_for_socket(socket_path: str) -> bool:
+    stopped = False
+    for pid in matching_shell_pids(socket_path):
+        if terminate_process_group(pid, signal.SIGTERM):
+            stopped = True
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        remaining = [pid for pid in matching_shell_pids(socket_path) if process_alive(pid)]
+        if not remaining:
+            return stopped
+        time.sleep(0.1)
+    for pid in matching_shell_pids(socket_path):
+        if terminate_process_group(pid, signal.SIGKILL):
+            stopped = True
+    return stopped
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     state = load_launcher_state()
     daemon = state.get("daemon") if isinstance(state.get("daemon"), dict) else {}
     shell = state.get("shell") if isinstance(state.get("shell"), dict) else {}
     shell_stopped = _stop_entry(shell)
+    shell_stopped = _stop_shells_for_socket(args.socket) or shell_stopped
     daemon_stopped = _stop_entry(daemon)
     if LAUNCHER_STATE_PATH.exists():
         try:
@@ -5892,7 +7346,7 @@ def build_parser() -> argparse.ArgumentParser:
     emit.set_defaults(handler=lambda args: emit_event(args.source, args))
     emit.add_argument("--source", default="unknown")
 
-    for source_name in ("claude", "codex", "gemini"):
+    for source_name in ("claude", "codex", "gemini", "cursor", "opencode"):
         command = sub.add_parser(source_name, parents=[common], help=f"Emit a {source_name} event")
         command.set_defaults(handler=lambda args, source_name=source_name: emit_event(source_name, args))
 
@@ -5932,19 +7386,22 @@ def build_parser() -> argparse.ArgumentParser:
     send_peek.add_argument("--dry-run", action="store_true")
     send_peek.set_defaults(handler=cmd_send_peek)
 
-    reconcile = sub.add_parser("reconcile", help="Scan live Claude/Codex processes and seed the daemon")
+    reconcile = sub.add_parser("reconcile", help="Scan live provider processes and seed the daemon")
     reconcile.add_argument("--socket", default=DEFAULT_SOCKET)
     reconcile.add_argument("--json", action="store_true")
     reconcile.add_argument("--print-events", action="store_true")
     reconcile.set_defaults(handler=cmd_reconcile)
 
-    install = sub.add_parser("install", help="Install Claude/Codex/Gemini integration hooks")
-    install.add_argument("target", choices=["claude", "codex", "gemini", "all"])
+    install = sub.add_parser("install", help="Install Claude/Codex/Gemini/Cursor/OpenCode integration hooks")
+    install.add_argument("target", choices=["claude", "codex", "gemini", "cursor", "opencode", "all"])
     install.add_argument("--dry-run", action="store_true")
     install.add_argument("--claude-settings", default=str(CLAUDE_SETTINGS_PATH))
     install.add_argument("--codex-config", default=str(CODEX_CONFIG_PATH))
     install.add_argument("--codex-hooks", default=str(CODEX_HOOKS_PATH))
     install.add_argument("--gemini-settings", default=str(GEMINI_SETTINGS_PATH))
+    install.add_argument("--cursor-config", default=str(CURSOR_CONFIG_PATH))
+    install.add_argument("--cursor-hooks", default=str(CURSOR_HOOKS_PATH))
+    install.add_argument("--opencode-config", default=str(OPENCODE_CONFIG_PATH))
     install.set_defaults(handler=cmd_install)
 
     claude_statusline = sub.add_parser("claude-statusline", help="Capture Claude status line input for quota HUD")
@@ -5968,6 +7425,25 @@ def build_parser() -> argparse.ArgumentParser:
     gemini_hook.add_argument("--payload")
     gemini_hook.add_argument("--print-event", action="store_true")
     gemini_hook.set_defaults(handler=cmd_gemini_hook)
+
+    cursor_statusline = sub.add_parser("cursor-statusline", help="Capture Cursor status line input for Vibe Island")
+    cursor_statusline.add_argument("--payload")
+    cursor_statusline.set_defaults(handler=cmd_cursor_statusline)
+
+    cursor_hook = sub.add_parser("cursor-hook", help="Bridge Cursor hook input into vibeisland")
+    cursor_hook.add_argument("--socket", default=DEFAULT_SOCKET)
+    cursor_hook.add_argument("--payload")
+    cursor_hook.add_argument("--print-event", action="store_true")
+    cursor_hook.set_defaults(handler=cmd_cursor_hook)
+
+    opencode_hook = sub.add_parser("opencode-hook", help="Bridge OpenCode plugin events into vibeisland")
+    opencode_hook.add_argument("--socket", default=DEFAULT_SOCKET)
+    opencode_hook.add_argument("--payload")
+    opencode_hook.add_argument("--permission-ask", action="store_true")
+    opencode_hook.add_argument("--permission-reply", action="store_true")
+    opencode_hook.add_argument("--permission-event", action="store_true")
+    opencode_hook.add_argument("--print-event", action="store_true")
+    opencode_hook.set_defaults(handler=cmd_opencode_hook)
 
     codex_notify = sub.add_parser("codex-notify", help="Bridge Codex notify payload into vibeisland")
     codex_notify.add_argument("--socket", default=DEFAULT_SOCKET)

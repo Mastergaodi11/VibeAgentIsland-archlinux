@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }
@@ -88,7 +88,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' codex-hook"
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' codex-hook"
           }
         ]
       }

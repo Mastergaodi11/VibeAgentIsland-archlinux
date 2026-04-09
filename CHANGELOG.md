@@ -1,4 +1,4 @@
-# Changelog
+# VibeAgentIsland-archlinux Changelog
 
 All notable changes to `Vibe Island for Linux` should be documented in this file.
 
@@ -16,15 +16,22 @@ Post-beta fixes currently staged for the next public update:
 - Gemini approvals now flow through the same provider-aware island + Telegram path as Claude and Codex when a managed approval request is present
 - grouped provider headers now own their own `5H / 7D / RUN` strip instead of the old mixed top quota row
 - session cards are moving to a compact three-line recent-dialogue layout with explicit `You` / provider labels
-- a new `settings_exp/` package now carries ready-to-copy example configs for Claude, Codex, and Gemini
+- a new `settings_exp/` package now carries ready-to-copy example configs for Claude, Codex, Gemini, Cursor, and OpenCode
 - Gemini island approvals now carry an explicit managed approval request key so in-island button clicks resolve the exact pending request instead of guessing by tty/pid
 - Gemini `BeforeTool` hooks now use a long-lived timeout so the CLI can keep waiting while the island holds the approval UI open
 - Gemini managed approvals now resolve against the exact live request first, and dead/stale Gemini approval request files are pruned instead of being reused accidentally
 - the shell now drops live Claude / Codex / Gemini cards as soon as their backing process disappears, which keeps killed terminals from lingering in grouped sections
 - Gemini installation now also writes a local `~/.local/bin/gemini` wrapper that launches Gemini CLI with `--approval-mode=yolo` unless you explicitly override approval flags, which prevents Gemini's native approval UI from fighting the island-managed approval flow
 - the shell now treats provider cards as live-only surface by default, so dead Claude / Codex / Gemini processes no longer linger in the grouped session list
+- Cursor CLI support now includes status line capture, hooks, grouped UI, island approvals, Telegram approvals, peek, jump, and a provider-specific 8-bit sprite/sound path
+- OpenCode support now includes a local plugin bridge, grouped UI, island approvals/questions, Telegram approvals, peek, jump, and a provider-specific 8-bit sprite/sound path
+- Cursor and OpenCode intentionally do not expose `5H / 7D` quota rows because their CLIs do not currently offer a stable local quota-window source
+- public docs now include a dedicated Cursor/OpenCode screenshot and explicitly document that OpenCode approvals were field-verified while Cursor approval completion still needs more field verification in this beta
+- `settings_exp/` now includes provider-specific `Cursor` and `OpenCode` notes, and the OpenCode path documents the generated plugin, stale-process pitfalls, and the required reinstall/relaunch flow
 - the shell now stores automatic inactivity collapse settings as persistent prefs, and the settings panel exposes both the enable toggle and the delay in seconds
 - the expanded panel now trims the empty gap above replay/session content when the settings panel is closed
+- a new `Aero Glass` setting now lets the shell switch to a frosted dark presentation with persisted transparency, defaulting to a subtle 5% effect
+- approval auto-front now scrolls to the exact session card that raised the prompt instead of only expanding the island shell
 - a dedicated portability roadmap now documents the Ubuntu 24.04 and Windows 11 follow-up path
 - Gemini still does not expose a stable local `5H / 7D` quota window source, so the shell intentionally keeps Gemini quota output marked as unavailable instead of fabricating percentages
 

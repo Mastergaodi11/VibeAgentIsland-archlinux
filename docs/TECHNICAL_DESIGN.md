@@ -55,12 +55,14 @@ Implemented now:
 - SQLite-backed event and session persistence
 - realtime snapshot subscription from daemon to shell
 - live process re-scan so already-running Claude/Codex sessions reappear after reopen
-- shell-side live session backfill from local process + artifact inspection so Claude / Codex / Gemini can still reappear even if the daemon snapshot temporarily misses one live terminal
-- hook-based adapters for Claude Code and Codex CLI
-- provider-grouped shell view model for Claude / Codex / Gemini sections
+- shell-side live session backfill from local process + artifact inspection so Claude / Codex / Gemini / Cursor / OpenCode can still reappear even if the daemon snapshot temporarily misses one live terminal
+- hook/plugin-based adapters for Claude Code, Codex CLI, Gemini CLI, Cursor CLI, and OpenCode
+- provider-grouped shell view model for Claude / Codex / Gemini / Cursor / OpenCode sections
 - provider section headers now own their own `5H / 7D / RUN` display instead of one mixed top quota strip
 - Gemini CLI minimum-viable adapter path covering live detection, approvals/questions, jump, Telegram, and peek
 - Gemini usage currently reports transcript/session token totals only; stable local 5h / 7d quota windows have not been found yet
+- Cursor CLI support now includes status line capture, hooks, in-island approvals, Telegram approvals, jump, and peek, but intentionally skips 5h / 7d quota output because Cursor does not expose a stable local quota-window source
+- OpenCode support now includes the local plugin bridge, in-island approvals/questions, Telegram approvals, jump, and peek, but intentionally skips 5h / 7d quota output because OpenCode does not expose a stable local quota-window source
 - Codex bridge logic now strictly honors `approval_policy = "never"` so normal coding work does not surface false island approvals
 - managed in-island approval handling for core Claude/Codex flows
 - draggable Qt/QML floating shell with inline response cards
@@ -88,6 +90,8 @@ Implemented now:
 - shell audio playback now prefers lightweight system audio players for bundled 8-bit cues, so startup should not depend on Qt multimedia hardware-decoder probing
 - expanded shell geometry is moving from content-driven sizing to persisted and clamped window sizing with direct mouse resize affordances
 - collapsed dragging is being widened to most of the notch body while explicit controls stay reserved for click actions
+- the shell now exposes an `Aero Glass` appearance mode with persisted transparency, so the dark island can shift between opaque and lightly frosted presentation without leaving the local settings model
+- approval auto-front is now being upgraded from "show the island" to "show the island and scroll to the exact session card that raised the prompt", so urgent cards do not get lost inside grouped sections
 - a launcher layer in `tools/vibeisland.py` now owns daemon/socket/shell orchestration so public startup becomes one command plus an optional desktop entry
 - public export is now an explicit build concern: the repo can remain a local superset, while `export-public` emits a collaboration-free `vibeisland-linux` tree for GitHub release
 - a dedicated portability handoff document now tracks Ubuntu 24.04 and Windows 11 follow-up work so future sessions can start from one stable checklist instead of rediscovering KDE/Linux assumptions
@@ -108,7 +112,7 @@ Not implemented yet:
 - full plan diff review
 - batch approval grouping
 - precision providers for kitty / wezterm / IDE terminals
-- production adapters beyond Claude/Codex/Gemini
+- production adapters beyond Claude/Codex/Gemini/Cursor/OpenCode
 
 ## Current Gaps To Close Next
 

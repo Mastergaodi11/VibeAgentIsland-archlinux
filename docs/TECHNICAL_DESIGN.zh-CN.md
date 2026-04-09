@@ -55,9 +55,9 @@
 - 基于 SQLite 的事件和会话持久化
 - daemon 到 shell 的实时快照订阅
 - 重开后重新扫描 live 进程，让仍在运行的 Claude / Codex 会话回到岛上
-- shell 现在还会结合本地进程与工件做 live session 回填，因此即使 daemon 快照一时漏掉某条 Claude / Codex / Gemini live 会话，岛上也更容易把它补回来
+- shell 现在还会结合本地进程与工件做 live session 回填，因此即使 daemon 快照一时漏掉某条 Claude / Codex / Gemini / Cursor / OpenCode live 会话，岛上也更容易把它补回来
 - Claude Code 与 Codex CLI 的 hook 适配
-- 展开态按 `Claude / Codex / Gemini` 分组的 shell view model
+- 展开态按 `Claude / Codex / Gemini / Cursor / OpenCode` 分组的 shell view model
 - 各 provider section header 现在承担各自的 `5H / 7D / RUN` 展示，而不再依赖顶部那条混合配额带
 - Gemini CLI 的最小可用适配路径，覆盖 live 检测、审批 / 提问、jump、Telegram 与 peek
 - Gemini 的 usage 目前只稳定提供 transcript / session token 总量；本地还没找到可靠的 5h / 7d 配额窗口来源
@@ -88,6 +88,8 @@
 - shell 音效现在优先走更轻量的系统音频播放器来播放内置 8-bit 提示音，从而避免启动阶段依赖 Qt 多媒体硬件解码探测
 - 展开态 shell 正在从内容驱动尺寸转向“持久化 + 钳制”的窗口尺寸模型，并支持用户直接用鼠标缩放
 - 折叠态拖拽热区正在扩展到 notch 的大部分主体区域，而显式操作控件仍保留给点击交互
+- shell 现在还提供了 `Aero Glass` 外观模式与持久化透明度设置，让深色岛能在不脱离本地设置体系的前提下切换到更轻的毛玻璃观感
+- 审批自动前置正在从“只把岛展开到前面”升级为“展开后自动滚动到真正触发交互的那张会话卡”，避免在 provider 分组里还要再手动找卡
 - `tools/vibeisland.py` 里新增了一层 launcher，负责统一编排 daemon / socket / shell，让公开版启动收敛为一条命令，并支持桌面入口
 - 公开导出现在成为明确的构建边界：本地仓库可以继续保留私有协作实验，但 `export-public` 导出的 `vibeisland-linux` 必须默认不带 collaboration 运行时依赖
 - 现在还新增了一份专门的跨平台交接文档，用来集中记录 Ubuntu 24.04 / Windows 11 后续工作，让下一轮移植不需要重新从 KDE/Linux 假设开始梳理
@@ -108,7 +110,7 @@
 - 完整 plan diff review
 - 批量审批
 - kitty / wezterm / IDE 终端的精准 provider
-- Claude / Codex / Gemini 之外的正式生产级适配器
+- Claude / Codex / Gemini / Cursor / OpenCode 之外的正式生产级适配器
 
 ## 当前需要优先补的缺口
 

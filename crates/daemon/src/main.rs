@@ -1453,11 +1453,15 @@ fn is_low_signal_task_label(value: &str) -> bool {
     if lowered.starts_with("codex @ ")
         || lowered.starts_with("claude @ ")
         || lowered.starts_with("gemini @ ")
+        || lowered.starts_with("cursor @ ")
+        || lowered.starts_with("opencode @ ")
         || lowered.starts_with("openclaw @ ")
         || lowered.starts_with("agent @ ")
         || lowered.starts_with("codex session")
         || lowered.starts_with("claude session")
         || lowered.starts_with("gemini session")
+        || lowered.starts_with("cursor session")
+        || lowered.starts_with("opencode session")
         || lowered.starts_with("openclaw session")
         || lowered.starts_with("agent session")
     {
@@ -1495,6 +1499,8 @@ fn is_low_signal_task_label(value: &str) -> bool {
         "bash wants approval",
         "claude needs your permission",
         "codex wants approval",
+        "cursor wants approval",
+        "opencode needs your permission",
         "approval request",
         "permission request",
         "running sessionstart hook",
@@ -1533,12 +1539,21 @@ fn is_low_signal_task_label(value: &str) -> bool {
         "pnpm -v",
         "codex session",
         "claude session",
+        "gemini session",
+        "cursor session",
+        "opencode session",
         "agent session",
         "codex @",
         "claude @",
+        "gemini @",
+        "cursor @",
+        "opencode @",
         "agent @",
         "codex ·",
         "claude ·",
+        "gemini ·",
+        "cursor ·",
+        "opencode ·",
         "agent ·",
     ];
 
@@ -2215,6 +2230,20 @@ fn detect_agent_source(cmdline: &str) -> Option<AgentSource> {
     {
         return Some(AgentSource::Gemini);
     }
+    if token_lower.contains("cursor-agent")
+        || token_lower.contains("/cursor")
+        || lower.contains(" cursor ")
+        || lower.starts_with("cursor ")
+    {
+        return Some(AgentSource::Cursor);
+    }
+    if token_lower.contains("opencode")
+        || lower.contains(" opencode ")
+        || lower.starts_with("opencode ")
+        || lower.contains("@opencode-ai")
+    {
+        return Some(AgentSource::Opencode);
+    }
     None
 }
 
@@ -2255,6 +2284,8 @@ fn agent_slug(source: &AgentSource) -> &'static str {
         AgentSource::Claude => "claude",
         AgentSource::Codex => "codex",
         AgentSource::Gemini => "gemini",
+        AgentSource::Cursor => "cursor",
+        AgentSource::Opencode => "opencode",
         AgentSource::Unknown => "agent",
     }
 }
@@ -2510,6 +2541,8 @@ fn summary_source(source: &AgentSource) -> &'static str {
         AgentSource::Claude => "Claude",
         AgentSource::Codex => "Codex",
         AgentSource::Gemini => "Gemini",
+        AgentSource::Cursor => "Cursor",
+        AgentSource::Opencode => "OpenCode",
         AgentSource::Unknown => "Agent",
     }
 }
@@ -2557,6 +2590,8 @@ fn stringify_source(source: &vibeisland_common::AgentSource) -> &'static str {
         vibeisland_common::AgentSource::Claude => "Claude",
         vibeisland_common::AgentSource::Codex => "Codex",
         vibeisland_common::AgentSource::Gemini => "Gemini",
+        vibeisland_common::AgentSource::Cursor => "Cursor",
+        vibeisland_common::AgentSource::Opencode => "OpenCode",
         vibeisland_common::AgentSource::Unknown => "Agent",
     }
 }

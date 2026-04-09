@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 5000
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 5000
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 600000
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 5000
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 5000
           }
         ]
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python '/path/to/vibeisland-linux/tools/vibeisland.py' gemini-hook",
+            "command": "/usr/bin/python '/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py' gemini-hook",
             "timeout": 5000
           }
         ]

@@ -43,6 +43,10 @@ Window {
     property bool telegramDraftEnabled: false
     property bool autoCollapseDraftEnabled: true
     property string autoCollapseDraftSeconds: "75"
+    property bool aeroGlassDraftEnabled: true
+    property real aeroGlassDraftTransparency: 5
+    property string attentionTargetSessionId: ""
+    property int attentionTargetRetries: 0
     signal requestPeekInputFocus(string sessionId)
     property real sessionScrollY: 0
     property bool restoringSessionScroll: false
@@ -71,6 +75,8 @@ Window {
     property color accentGreen: "#63a678"
     property color accentAmber: "#977654"
     property color accentOrange: "#aa724f"
+    property color accentTeal: "#79d1bb"
+    property color accentGold: "#f2a46b"
     property color accentSlate: "#8d97a2"
     property color accentViolet: "#a79aff"
     property bool headerCompact: backend.expanded && width < 760
@@ -134,6 +140,93 @@ Window {
         return root.headerUltraCompact ? "QT" : "QUIET"
     }
 
+    function glassAmount() {
+        if (!backend.aeroGlassEnabled) {
+            return 0.0
+        }
+        return Math.max(0, Math.min(100, Number(backend.aeroGlassTransparency || 0))) / 100.0
+    }
+
+    function panelOpacity(baseOpacity, reduction, minimumOpacity) {
+        if (!backend.aeroGlassEnabled) {
+            return baseOpacity
+        }
+        var minValue = minimumOpacity === undefined ? 0.72 : minimumOpacity
+        return Math.max(minValue, baseOpacity - glassAmount() * reduction)
+    }
+
+    function frostedColor(baseColor, tintStrength) {
+        if (!backend.aeroGlassEnabled) {
+            return baseColor
+        }
+        return Qt.tint(baseColor, Qt.rgba(0.84, 0.90, 0.97, tintStrength + glassAmount() * 0.08))
+    }
+
+    function groupedIndexForSession(sessionId) {
+        var normalized = safeText(sessionId)
+        if (normalized === "") {
+            return -1
+        }
+        var items = groupedItems()
+        for (var i = 0; i < items.length; ++i) {
+            var item = items[i]
+            if (item === undefined || item === null || safeText(item.entryType) === "section") {
+                continue
+            }
+            if (safeText(item.id) === normalized) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    function ensurePromptSectionExpanded(sessionId) {
+        var normalized = safeText(sessionId)
+        if (normalized === "") {
+            return
+        }
+        var items = groupedItems()
+        for (var i = 0; i < items.length; ++i) {
+            var item = items[i]
+            if (item === undefined || item === null || safeText(item.entryType) === "section") {
+                continue
+            }
+            if (safeText(item.id) !== normalized) {
+                continue
+            }
+            var providerKey = safeText(item.providerKey).toLowerCase()
+            if (providerKey !== "" && backend.groupedSectionCollapsed[providerKey] === true) {
+                backend.toggleProviderSection(providerKey)
+            }
+            return
+        }
+    }
+
+    function scrollToAttentionTarget(sessionId) {
+        var normalized = safeText(sessionId)
+        if (normalized === "" || sessionList === null || sessionList === undefined) {
+            return false
+        }
+        ensurePromptSectionExpanded(normalized)
+        var targetIndex = groupedIndexForSession(normalized)
+        if (targetIndex < 0) {
+            return false
+        }
+        sessionList.positionViewAtIndex(targetIndex, ListView.Beginning)
+        root.rememberSessionScroll(sessionList.contentY)
+        return true
+    }
+
+    function requestAttentionTarget(sessionId) {
+        var normalized = safeText(sessionId)
+        if (normalized === "") {
+            return
+        }
+        root.attentionTargetSessionId = normalized
+        root.attentionTargetRetries = 8
+        attentionTargetTimer.restart()
+    }
+
     function schedulePersist() {
         if (geometryReady) {
             persistTimer.restart()
@@ -146,6 +239,8 @@ Window {
         root.telegramDraftEnabled = backend.telegramEnabled
         root.autoCollapseDraftEnabled = backend.autoCollapseEnabled
         root.autoCollapseDraftSeconds = String(backend.autoCollapseSeconds)
+        root.aeroGlassDraftEnabled = backend.aeroGlassEnabled
+        root.aeroGlassDraftTransparency = Number(backend.aeroGlassTransparency)
     }
 
     function rememberSessionScroll(value) {
@@ -563,6 +658,12 @@ Window {
         if (provider === "gemini") {
             return "gemini"
         }
+        if (provider === "cursor") {
+            return "cursor"
+        }
+        if (provider === "opencode") {
+            return "opencode"
+        }
         if (provider === "collab") {
             return "island"
         }
@@ -588,6 +689,12 @@ Window {
         }
         if (provider === "gemini") {
             return "#9387da"
+        }
+        if (provider === "cursor") {
+            return "#79d1bb"
+        }
+        if (provider === "opencode") {
+            return "#f2a46b"
         }
         if (provider === "collab") {
             return "#6fb390"
@@ -616,6 +723,12 @@ Window {
         if (source.indexOf("gemini") !== -1 || source.indexOf("google") !== -1) {
             return "gemini"
         }
+        if (source.indexOf("cursor") !== -1) {
+            return "cursor"
+        }
+        if (source.indexOf("opencode") !== -1) {
+            return "opencode"
+        }
         return "default"
     }
 
@@ -629,6 +742,12 @@ Window {
         }
         if (provider === "gemini") {
             return "gemini"
+        }
+        if (provider === "cursor") {
+            return "cursor"
+        }
+        if (provider === "opencode") {
+            return "opencode"
         }
         if (provider === "collab") {
             return "island"
@@ -716,6 +835,11 @@ Window {
 
     function providerHeaderUsageRows(providerKey) {
         var provider = safeText(providerKey).toLowerCase()
+        if (provider === "cursor" || provider === "opencode") {
+            return [
+                { "label": "RUN", "value": String(usageSessionTokens(providerKey)) }
+            ]
+        }
         if (provider !== "claude" && provider !== "codex" && provider !== "gemini") {
             return []
         }
@@ -736,6 +860,12 @@ Window {
         }
         if (provider === "gemini") {
             return root.accentViolet
+        }
+        if (provider === "cursor") {
+            return root.accentTeal
+        }
+        if (provider === "opencode") {
+            return root.accentGold
         }
         if (provider === "collab") {
             return root.accentGreen
@@ -853,6 +983,12 @@ Window {
         }
         if (provider === "gemini") {
             return "#b3a6ff"
+        }
+        if (provider === "cursor") {
+            return "#8ee7cf"
+        }
+        if (provider === "opencode") {
+            return "#ffc58d"
         }
         return root.sessionSummaryTone(session)
     }
@@ -1422,6 +1558,28 @@ Window {
         onTriggered: root.raise()
     }
 
+    Timer {
+        id: attentionTargetTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            if (root.attentionTargetSessionId === "") {
+                return
+            }
+            if (root.scrollToAttentionTarget(root.attentionTargetSessionId)) {
+                root.attentionTargetSessionId = ""
+                root.attentionTargetRetries = 0
+                return
+            }
+            if (root.attentionTargetRetries > 0) {
+                root.attentionTargetRetries -= 1
+                attentionTargetTimer.restart()
+                return
+            }
+            root.attentionTargetSessionId = ""
+        }
+    }
+
     Component.onCompleted: {
         syncWindowGeometry(false)
         centerIfNeeded()
@@ -1471,6 +1629,9 @@ Window {
                 return
             }
             root.syncSessionModel(true)
+            if (root.attentionTargetSessionId !== "") {
+                attentionTargetTimer.restart()
+            }
         }
 
         function onResponseFinished(sessionId, ok, message) {
@@ -1502,6 +1663,9 @@ Window {
             root.syncWindowGeometry(false)
             if (backend.expanded) {
                 root.restoreSessionScroll()
+                if (root.attentionTargetSessionId !== "") {
+                    attentionTargetTimer.restart()
+                }
             }
         }
 
@@ -1513,10 +1677,17 @@ Window {
             }
         }
 
-        function onAttentionRequested() {
+        function onAttentionRequested(sessionId) {
             root.show()
             root.raise()
             root.requestActivate()
+            if (backend.expanded) {
+                root.requestAttentionTarget(sessionId)
+            } else {
+                Qt.callLater(function() {
+                    root.requestAttentionTarget(sessionId)
+                })
+            }
         }
 
         function onSummonRequested() {
@@ -1546,6 +1717,10 @@ Window {
         function onAutoCollapseChanged() {
             root.syncSettingsDrafts()
         }
+
+        function onAppearanceChanged() {
+            root.syncSettingsDrafts()
+        }
     }
 
     Item {
@@ -1555,14 +1730,14 @@ Window {
             anchors.fill: parent
             radius: 36
             color: root.surfaceBase
-            opacity: 0.78
+            opacity: backend.aeroGlassEnabled ? 0.32 + (0.12 * (1.0 - root.glassAmount())) : 0.78
         }
 
         Rectangle {
             anchors.fill: parent
             radius: 36
             color: "#000000"
-            opacity: 0.14
+            opacity: backend.aeroGlassEnabled ? 0.06 : 0.14
         }
 
         Rectangle {
@@ -1570,13 +1745,15 @@ Window {
             anchors.fill: parent
             radius: 36
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#0f1418" }
-                GradientStop { position: 0.36; color: "#090c10" }
-                GradientStop { position: 1.0; color: "#06080b" }
+                GradientStop { position: 0.0; color: backend.aeroGlassEnabled ? Qt.tint("#0f1418", Qt.rgba(0.80, 0.88, 0.97, 0.10)) : "#0f1418" }
+                GradientStop { position: 0.36; color: backend.aeroGlassEnabled ? Qt.tint("#090c10", Qt.rgba(0.77, 0.86, 0.96, 0.08)) : "#090c10" }
+                GradientStop { position: 1.0; color: backend.aeroGlassEnabled ? Qt.tint("#06080b", Qt.rgba(0.73, 0.82, 0.93, 0.06)) : "#06080b" }
             }
             border.width: 1
-            border.color: backend.blockedCount > 0 ? "#6b485312" : "#20262d16"
-            opacity: 0.985
+            border.color: backend.blockedCount > 0
+                          ? (backend.aeroGlassEnabled ? "#86606a40" : "#6b485312")
+                          : (backend.aeroGlassEnabled ? "#4f5f7042" : "#20262d16")
+            opacity: root.panelOpacity(0.985, 0.34, 0.70)
         }
 
         Rectangle {
@@ -1615,13 +1792,16 @@ Window {
             height: 48
             radius: 24
             gradient: Gradient {
-                GradientStop { position: 0.0; color: backend.expanded ? "#0e1317" : "#10151a" }
-                GradientStop { position: 0.24; color: backend.expanded ? "#0a0f13" : "#0c1115" }
-                GradientStop { position: 0.76; color: backend.expanded ? "#070b0f" : "#090d11" }
-                GradientStop { position: 1.0; color: backend.expanded ? "#06080b" : "#070a0d" }
+                GradientStop { position: 0.0; color: backend.aeroGlassEnabled ? Qt.tint(backend.expanded ? "#0e1317" : "#10151a", Qt.rgba(0.85, 0.91, 0.98, 0.10)) : (backend.expanded ? "#0e1317" : "#10151a") }
+                GradientStop { position: 0.24; color: backend.aeroGlassEnabled ? Qt.tint(backend.expanded ? "#0a0f13" : "#0c1115", Qt.rgba(0.82, 0.89, 0.97, 0.09)) : (backend.expanded ? "#0a0f13" : "#0c1115") }
+                GradientStop { position: 0.76; color: backend.aeroGlassEnabled ? Qt.tint(backend.expanded ? "#070b0f" : "#090d11", Qt.rgba(0.78, 0.86, 0.95, 0.07)) : (backend.expanded ? "#070b0f" : "#090d11") }
+                GradientStop { position: 1.0; color: backend.aeroGlassEnabled ? Qt.tint(backend.expanded ? "#06080b" : "#070a0d", Qt.rgba(0.76, 0.84, 0.94, 0.06)) : (backend.expanded ? "#06080b" : "#070a0d") }
             }
             border.width: 1
-            border.color: backend.expanded ? "#141a20" : "#0b1014"
+            border.color: backend.aeroGlassEnabled
+                          ? (backend.expanded ? "#31404a88" : "#26303882")
+                          : (backend.expanded ? "#141a20" : "#0b1014")
+            opacity: root.panelOpacity(1.0, 0.14, 0.82)
 
                 Rectangle {
                     anchors.left: parent.left
@@ -2553,9 +2733,10 @@ Window {
                 visible: settingsOpen
                 height: visible ? (settingsColumn.implicitHeight + 20) : 0
                 radius: 14
-                color: "#0b0f13"
+                color: backend.aeroGlassEnabled ? root.frostedColor("#0b0f13", 0.08) : "#0b0f13"
                 border.width: 1
-                border.color: "#171e25"
+                border.color: backend.aeroGlassEnabled ? "#2f3d48a6" : "#171e25"
+                opacity: root.panelOpacity(1.0, 0.12, 0.86)
                 clip: true
 
                 Column {
@@ -2773,6 +2954,133 @@ Window {
                     Text {
                         width: parent.width
                         text: "When enabled, the island collapses itself after a period with no clicks, keypresses, scrolling, or other direct interaction."
+                        color: root.inkMuted
+                        font.family: root.primaryFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: 8
+
+                        Text {
+                            text: "AERO GLASS"
+                            color: root.inkStrong
+                            font.family: root.primaryFont
+                            font.pixelSize: 9
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                        }
+
+                        Item {
+                            width: Math.max(6, parent.width - 286)
+                            height: 1
+                        }
+
+                        Rectangle {
+                            width: 58
+                            height: 18
+                            radius: 9
+                            color: aeroGlassDraftEnabled ? "#0d1318" : "#090d11"
+                            border.width: 1
+                            border.color: aeroGlassDraftEnabled ? "#24303b" : "#171e25"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: aeroGlassDraftEnabled ? "ON" : "OFF"
+                                color: aeroGlassDraftEnabled ? "#d6dfe6" : root.inkMuted
+                                font.family: root.primaryFont
+                                font.pixelSize: 8
+                                font.bold: true
+                                font.letterSpacing: 0.8
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    aeroGlassDraftEnabled = !aeroGlassDraftEnabled
+                                    backend.saveAeroGlassSettings(aeroGlassDraftEnabled, Math.round(aeroGlassDraftTransparency))
+                                }
+                            }
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: 10
+
+                        Item {
+                            id: aeroSlider
+                            width: Math.max(180, parent.width - 82)
+                            height: 20
+
+                            function updateFromPosition(posX) {
+                                var ratio = Math.max(0, Math.min(1, posX / width))
+                                aeroGlassDraftTransparency = Math.round(ratio * 100)
+                                backend.noteUserInteraction()
+                                backend.saveAeroGlassSettings(aeroGlassDraftEnabled, Math.round(aeroGlassDraftTransparency))
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 6
+                                radius: 3
+                                color: "#0a0d11"
+                                border.width: 1
+                                border.color: "#171e25"
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.max(8, (parent.width - 10) * (aeroGlassDraftTransparency / 100.0) + 10)
+                                height: 6
+                                radius: 3
+                                color: "#8fb5c4"
+                                opacity: 0.72
+                            }
+
+                            Rectangle {
+                                width: 12
+                                height: 12
+                                radius: 6
+                                x: Math.max(0, Math.min(parent.width - width, (parent.width - width) * (aeroGlassDraftTransparency / 100.0)))
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: "#d7e2ea"
+                                border.width: 1
+                                border.color: "#0f1418"
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onPressed: aeroSlider.updateFromPosition(mouse.x)
+                                onPositionChanged: {
+                                    if (pressed) {
+                                        aeroSlider.updateFromPosition(mouse.x)
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: 42
+                            anchors.verticalCenter: aeroSlider.verticalCenter
+                            text: Math.round(aeroGlassDraftTransparency) + "%"
+                            color: root.inkMuted
+                            font.family: root.monoFont
+                            font.pixelSize: 10
+                            horizontalAlignment: Text.AlignRight
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: "Adds a frosted dark glass treatment to the island. Default is enabled with a very light 5% transparency."
                         color: root.inkMuted
                         font.family: root.primaryFont
                         font.pixelSize: 9
@@ -3062,9 +3370,9 @@ Window {
                 visible: backend.timeline.length > 0
                 height: visible ? (backend.replayExpanded ? (38 + root.timelineEntries().length * 18) : 34) : 0
                 radius: 12
-                color: "#080b0f"
+                color: backend.aeroGlassEnabled ? root.frostedColor("#080b0f", 0.06) : "#080b0f"
                 border.width: 1
-                border.color: "#11161c"
+                border.color: backend.aeroGlassEnabled ? "#28343ea0" : "#11161c"
                 opacity: visible ? 1 : 0
                 clip: true
 
@@ -3325,8 +3633,9 @@ Window {
                         anchors.fill: parent
                         z: 3
                         radius: 8
-                        color: "#05080b"
+                        color: backend.aeroGlassEnabled ? root.frostedColor("#05080b", 0.05) : "#05080b"
                         border.width: 0
+                        opacity: root.panelOpacity(1.0, 0.10, 0.88)
 
                         Rectangle {
                             id: sectionIconPlate
@@ -3969,13 +4278,13 @@ Window {
                         radius: 10
                         z: -4
                         color: delegateRoot.urgent
-                               ? Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.028)
-                               : "#050709"
+                               ? Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, backend.aeroGlassEnabled ? 0.040 : 0.028)
+                               : (backend.aeroGlassEnabled ? root.frostedColor("#050709", 0.05) : "#050709")
                         border.width: 1
                         border.color: delegateRoot.urgent
-                                      ? Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.2)
-                                      : Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, 0.12)
-                        opacity: 0.995
+                                      ? Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, backend.aeroGlassEnabled ? 0.28 : 0.2)
+                                      : Qt.rgba(delegateRoot.accent.r, delegateRoot.accent.g, delegateRoot.accent.b, backend.aeroGlassEnabled ? 0.18 : 0.12)
+                        opacity: root.panelOpacity(0.995, 0.12, 0.88)
                     }
 
                     onShowPeekPanelChanged: {
@@ -4032,9 +4341,10 @@ Window {
                         anchors.bottomMargin: 8 + (delegateRoot.responding ? 40 : 0) + (delegateRoot.showResponsePanel ? delegateRoot.responsePanelHeight + 8 : 0)
                         height: visible ? delegateRoot.peekPanelHeight : 0
                         radius: 11
-                        color: "#05070a"
+                        color: backend.aeroGlassEnabled ? root.frostedColor("#05070a", 0.06) : "#05070a"
                         border.width: 1
-                        border.color: "#12171d"
+                        border.color: backend.aeroGlassEnabled ? "#2a3640a0" : "#12171d"
+                        opacity: root.panelOpacity(1.0, 0.10, 0.88)
                         clip: true
 
                         Column {

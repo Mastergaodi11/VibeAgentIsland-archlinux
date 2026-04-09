@@ -1,5 +1,5 @@
 approval_policy = "never"
-notify = ["/usr/bin/python", "/path/to/vibeisland-linux/tools/vibeisland.py", "codex-notify"]
+notify = ["/usr/bin/python", "/path/to/VibeAgentIsland-archlinux/tools/vibeisland.py", "codex-notify"]
 
 [features]
 codex_hooks = true
